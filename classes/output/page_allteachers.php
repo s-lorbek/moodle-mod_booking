@@ -25,7 +25,7 @@
 namespace mod_booking\output;
 
 use context_system;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use moodle_url;
 use renderer_base;
 use renderable;
@@ -41,7 +41,6 @@ use templatable;
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class page_allteachers implements renderable, templatable {
-
     /** @var stdClass $listofteachers */
     public $listofteachers = [];
 
@@ -86,17 +85,24 @@ class page_allteachers implements renderable, templatable {
 
         // We transform the data object to an array where we can read key & value.
         foreach ($this->listofteachers as $teacher) {
-
             // Here we can load custom userprofile fields and add the to the array to render.
             // Right now, we just use a few standard pieces of information.
+
+            $shortdescription = strip_tags(format_text($teacher->description, $teacher->descriptionformat));
+            $shortdescription = substr($shortdescription, 0, 300);
 
             $teacherarr = [
                 'teacherid' => $teacher->id,
                 'firstname' => $teacher->firstname,
                 'lastname' => $teacher->lastname,
                 'orderletter' => substr($teacher->lastname, 0, 1), // First letter of the teacher's last name.
-                'description' => format_text($teacher->description, $teacher->descriptionformat),
+                'description' => $shortdescription,
+
             ];
+
+            if (strlen(strip_tags($teacher->description ?? '')) > 300) {
+                $teacherarr['descriptionlong'] = format_text($teacher->description, $teacher->descriptionformat);
+            }
 
             if ($teacher->picture) {
                 $picture = new \user_picture($teacher);
@@ -116,18 +122,21 @@ class page_allteachers implements renderable, templatable {
             // However, a site admin will always see e-mail addresses.
             // If the plugin setting to show all teacher e-mails (teachersshowemails) is turned on...
             // ... then teacher e-mails will always be shown to anyone.
-            if (!empty($teacher->email) &&
+            if (
+                !empty($teacher->email) &&
                 ($teacher->maildisplay == 1 ||
                     has_capability('mod/booking:updatebooking', $context) ||
                     get_config('booking', 'teachersshowemails') ||
-                    (get_config('booking', 'bookedteachersshowemails')
-                        && (booking_answers::number_actively_booked($USER->id, $teacher->id) > 0))
-                )) {
+                    (get_config('booking', 'bookedteachersshowemails') &&
+                        (booking_answers::number_actively_booked($USER->id, $teacher->id) > 0))
+                )
+            ) {
                 $teacherarr['email'] = $teacher->email;
             }
 
             if (!empty($CFG->messaging)) {
-                if (page_teacher::teacher_messaging_is_possible($teacher->id) ||
+                if (
+                    page_teacher::teacher_messaging_is_possible($teacher->id) ||
                     get_config('booking', 'alwaysenablemessaging')
                 ) {
                     $teacherarr['messagingispossible'] = true;

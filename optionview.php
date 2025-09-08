@@ -23,6 +23,7 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+use mod_booking\local\override_user_field;
 use mod_booking\output\bookingoption_description;
 use mod_booking\singleton_service;
 
@@ -40,13 +41,24 @@ $userid = optional_param('userid', 0, PARAM_INT);
 
 $returnto = optional_param('returnto', '', PARAM_ALPHA);
 $returnurl = optional_param('returnurl', '', PARAM_URL);
+$redirecttocourse = optional_param('redirecttocourse', 0, PARAM_INT);
 
-$syscontext = context_system::instance();
+$cvpwd = optional_param('cvpwd', '', PARAM_TEXT);
+$cvfield = optional_param('cvfield', '', PARAM_TEXT);
+
+
 $modcontext = context_module::instance($cmid);
+$syscontext = context_system::instance();
 
-// If we have this setting.
-if (!get_config('booking', 'bookonlyondetailspage')) {
-    require_capability('mod/booking:view', $modcontext);
+if (
+    $userid != $USER->id
+    && !has_capability('mod/booking:updatebooking', $modcontext)
+) {
+    $userid = $USER->id;
+}
+$overridefield = new override_user_field($cmid);
+if ($overridefield->password_is_valid($cvpwd)) {
+    $overridefield->set_userprefs($cvfield, $userid);
 }
 
 $PAGE->set_context($syscontext);
@@ -55,29 +67,65 @@ $url = new moodle_url('/mod/booking/optionview.php', ['cmid' => $cmid, 'optionid
 $PAGE->set_url($url);
 
 $booking = singleton_service::get_instance_of_booking_by_cmid($cmid);
+$settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+$ba = singleton_service::get_instance_of_booking_answers($settings);
+$bausersonlist = $ba->get_usersonlist();
+$courseid = $settings->courseid;
 
-// Make sure, we respect module visibility and activity restrictions on the booking instance.
-$modinfo = get_fast_modinfo($booking->course);
-$cm = $modinfo->get_cm($cmid);
-if (!$cm->uservisible && !get_config('booking', 'bookonlyondetailspage')) {
-    echo $OUTPUT->header();
-    echo html_writer::div(
-        get_string('invisibleoption:notallowed', 'mod_booking'),
-        "alert alert-danger"
-    );
-    echo $OUTPUT->footer();
-    die();
+if ($redirecttocourse === 1 && isset($bausersonlist[$USER->id])) {
+    $url = new moodle_url('/course/view.php', ['id' => $courseid]);
+    redirect($url->out());
 }
 
-if ($settings = singleton_service::get_instance_of_booking_option_settings($optionid)) {
+if ($settings && !empty($settings->id)) {
     if ($userid == $USER->id || $userid == 0) {
         $user = $USER;
     } else {
         $user = singleton_service::get_instance_of_user($userid);
     }
 
+    $ba = singleton_service::get_instance_of_booking_answers($settings);
 
-    $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
+    if (isloggedin() && !isguestuser()) {
+        $user = $USER;
+    }
+
+    // There can be cases where we are booked, but don't have the right to see.
+    // We override this here. If we are booked, we can also see details.
+    if (
+        (
+            isloggedin()
+            && !isguestuser()
+            && $USER->id == $user->id
+            && $ba->user_status($USER->id) > MOD_BOOKING_STATUSPARAM_RESERVED
+        )
+        && !get_config('booking', 'showbookingdetailstoall')
+    ) {
+        require_login();
+
+        // If we have this setting.
+        if (!get_config('booking', 'bookonlyondetailspage')) {
+            require_capability('mod/booking:view', $modcontext);
+        }
+    }
+
+    // If the user is logged-in, we check if (s)he has accepted the site policy.
+    if (isloggedin() && !isguestuser()) {
+        $currentpolicyversionids = \tool_policy\api::get_current_versions_ids();
+        if (!empty($currentpolicyversionids)) {
+            foreach ($currentpolicyversionids as $currentpolicyversionid) {
+                if (\tool_policy\api::get_agreement_optional($currentpolicyversionid)) {
+                    continue;
+                }
+                $acceptance = \tool_policy\api::get_user_version_acceptance($USER->id, $currentpolicyversionid);
+                if (empty($acceptance)) {
+                    // If the user did not yet accept, we redirect to the policy page.
+                    $policyurl = new moodle_url('/admin/tool/policy/index.php', ['returnurl' => $url]);
+                    redirect($policyurl);
+                }
+            }
+        }
+    }
 
     $PAGE->set_title(format_string($settings->get_title_with_prefix()));
     $PAGE->set_pagelayout('base');
@@ -97,7 +145,7 @@ if ($settings = singleton_service::get_instance_of_booking_option_settings($opti
 
     if ($data->is_invisible()) {
         // If the user does have the capability to see invisible options...
-        if (has_capability('mod/booking:canseeinvisibleoptions', $syscontext)) {
+        if (has_capability('mod/booking:canseeinvisibleoptions', $modcontext)) {
             // ... then show it.
             echo $output->render_bookingoption_description_view($data);
         } else {

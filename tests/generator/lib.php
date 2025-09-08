@@ -23,10 +23,11 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
-
-global $CFG;
-
+use mod_booking\booking;
+use mod_booking\booking_rules\booking_rules;
+use mod_booking\booking_rules\rules_info;
+use mod_booking\output\view;
+use mod_booking\table\bookingoptions_wbtable;
 use mod_booking\booking_option;
 use mod_booking\booking_campaigns\campaigns_info;
 use mod_booking\singleton_service;
@@ -35,6 +36,11 @@ use mod_booking\bo_availability\bo_info;
 use mod_booking\price as Mod_bookingPrice;
 use local_shopping_cart\shopping_cart;
 use local_shopping_cart\local\cartstore;
+use mod_booking\bo_actions\actions_info;
+
+defined('MOODLE_INTERNAL') || die();
+
+global $CFG;
 
 /**
  * Class to handle module booking data generator
@@ -46,7 +52,6 @@ use local_shopping_cart\local\cartstore;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class mod_booking_generator extends testing_module_generator {
-
     /**
      *
      * @var int keep track of how many booking options have been created.
@@ -82,7 +87,7 @@ class mod_booking_generator extends testing_module_generator {
 
         $defaultsettings = [
             'assessed' => 0,
-            'showviews' => 'showall,showactive,mybooking,myoptions,myinstitution',
+            'showviews' => 'showall,showactive,mybooking,myoptions,optionsiamresponsiblefor,myinstitution',
             'whichview' => 'showall',
             'optionsfields' => 'description,statusdescription,teacher,showdates,dayofweektime,
                                 location,institution,minanswers',
@@ -100,6 +105,18 @@ class mod_booking_generator extends testing_module_generator {
             if (!isset($record->{$name})) {
                 $record->{$name} = $value;
             }
+        }
+
+        // Process instance's maxoptionsfromcategoryvalue.
+        if (!empty($record->maxoptionsfromcategoryvalue)) {
+            $record->maxoptionsfromcategoryvalue = explode(',', $record->maxoptionsfromcategoryvalue);
+        }
+
+        if (empty($record->disablebooking)) {
+            // This will store the correct JSON to $optionvalues->json.
+            booking::remove_key_from_json($record, "disablebooking");
+        } else {
+            booking::add_data_to_json($record, "disablebooking", 1);
         }
 
         // To set default semester is mandatory.
@@ -127,12 +144,14 @@ class mod_booking_generator extends testing_module_generator {
 
         if (!isset($record['bookingid'])) {
             throw new coding_exception(
-                    'bookingid must be present in phpunit_util::create_option() $record');
+                'bookingid must be present in mod_booking_generator::create_option() $record'
+            );
         }
 
         if (!isset($record['text'])) {
             throw new coding_exception(
-                    'text must be present in phpunit_util::create_option() $record');
+                'text must be present in mod_booking_generator::create_option() $record'
+            );
         }
 
         $booking = singleton_service::get_instance_of_booking_by_bookingid($record['bookingid']);
@@ -145,7 +164,7 @@ class mod_booking_generator extends testing_module_generator {
         // Finalizing object with required properties.
         $record->id = 0;
         $record->cmid = $booking->cmid;
-        $record->identifier = booking_option::create_truly_unique_option_identifier();
+        $record->identifier = $record->identifier ?? booking_option::create_truly_unique_option_identifier();
 
         $context = context_module::instance($record->cmid);
 
@@ -159,24 +178,34 @@ class mod_booking_generator extends testing_module_generator {
             foreach ($teacherarr as $teacher) {
                 $record->teachersforoption[] = $this->get_user(trim($teacher));
             }
+        } else {
+            $record->teachersforoption = [];
         }
 
+        // Process option responsible contact persons.
+        if (!empty($record->responsiblecontact)) {
+            $rcparr = explode(',', $record->responsiblecontact);
+            $record->responsiblecontact = [];
+            foreach ($rcparr as $rcp) {
+                $record->responsiblecontact[] = $this->get_user(trim($rcp));
+            }
+        } else {
+            $record->responsiblecontact = [];
+        }
+
+        // Process semesterID.
         if (!empty($record->semesterid)) {
             // Force $bookingsettings->semesterid by given $record->semesterid.
             $DB->set_field('booking', 'semesterid', $record->semesterid, ['id' => $record->bookingid]);
-            // It might be necessary to reset cache.
-            // phpcs:ignore
-            //$semester = new semester($record->semesterid);
         }
 
         // Create / save booking option(s).
-        if ($record->id = booking_option::update($record, $context)) {
-            $record->optionid = $record->id;
+        $record->id = booking_option::update($record, $context);
 
-            // Add price (via API).
-            $price = new Mod_bookingPrice('option', $record->id);
-            $price->set_data($record);
-            booking_option::update($record, $context);
+        // Override to force given timemadevisible.
+        if (!empty($record->timemadevisible)) {
+            $DB->set_field('booking_options', 'timemadevisible', $record->timemadevisible, ['id' => $record->id]);
+            singleton_service::destroy_booking_option_singleton($record->id);
         }
 
         return $record;
@@ -198,7 +227,7 @@ class mod_booking_generator extends testing_module_generator {
         $option = singleton_service::get_instance_of_booking_option($settings->cmid, $settings->id);
         $user = $DB->get_record('user', ['id' => (int)$record->userid], '*', MUST_EXIST);
         $option->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $record->userid, true);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $record->userid, true);
         // Value of $id expected to be MOD_BOOKING_BO_COND_ALREADYBOOKED.
 
         return $id;
@@ -215,8 +244,9 @@ class mod_booking_generator extends testing_module_generator {
 
         $record = (object) $record;
 
-        $record->id = $DB->insert_record('booking_pricecategories', $record);
-
+        if (!$DB->record_exists('booking_pricecategories', ['identifier' => $record->identifier])) {
+            $record->id = $DB->insert_record('booking_pricecategories', $record);
+        }
         return $record;
     }
 
@@ -305,8 +335,13 @@ class mod_booking_generator extends testing_module_generator {
                 $itemid = 0;
         }
 
-        Mod_bookingPrice::add_price($record->area, $itemid, $record->pricecategoryidentifier,
-        $record->price, $record->currency);
+        Mod_bookingPrice::add_price(
+            $record->area,
+            $itemid,
+            $record->pricecategoryidentifier,
+            $record->price,
+            $record->currency
+        );
     }
     /**
      * Function to create a dummy semester option.
@@ -333,6 +368,9 @@ class mod_booking_generator extends testing_module_generator {
     public function create_rule($ruledraft = null) {
         global $DB;
 
+        rules_info::destroy_singletons();
+        booking_rules::$rules = [];
+
         $ruledraft = (object) $ruledraft;
 
         $record = new stdClass();
@@ -348,27 +386,32 @@ class mod_booking_generator extends testing_module_generator {
         $ruleobject->actionname = $ruledraft->actionname;
         $ruleobject->actiondata = json_decode($ruledraft->actiondata);
         $ruleobject->rulename = $ruledraft->rulename;
-        $ruleobject->ruledata = json_decode($ruledraft->ruledata);
+        // Compatibility for old tests on tules.
+        if (!empty($ruledraft->ruledata)) {
+            $ruleobject->ruledata = json_decode($ruledraft->ruledata);
+            if (empty($ruleobject->ruledata->cancelrules)) {
+                $ruleobject->ruledata->cancelrules = [];
+            }
+        }
         if (empty($ruleobject->ruledata)) {
             $ruleobject->ruledata = new stdClass();
+            $ruleobject->ruledata->boevent = $ruledraft->eventname ?? $ruledraft->boevent ?? '';
+            $ruleobject->ruledata->aftercompletion = $ruledraft->aftercompletion ?? '';
+            $ruleobject->ruledata->condition = $ruledraft->condition ?? '';
+            $ruleobject->ruledata->cancelrules = explode(',', $ruledraft->cancelrules) ?? [];
         }
-
-        // Setup event name if provided explicitly or from ruledata if provided.
-        if (!empty($ruledraft->eventname)) {
-            $record->eventname = $ruledraft->eventname;
-        } else if (!empty($ruleobject->ruledata->boevent)) {
-            $record->eventname = $ruleobject->ruledata->boevent;
+        // It is critical of having eventname.
+        $record->eventname = $ruledraft->eventname ?? $ruleobject->ruledata->boevent ?? '';
+        if (empty($record->eventname) && $record->rulename == 'rule_react_on_event') {
+            throw new coding_exception(
+                'rule_react_on_event: eventname (boevent) must be present in mod_booking_generator::create_option() $record'
+            );
         }
-
-        // Setup rule overriding.
-        if (empty($ruleobject->ruledata->cancelrules)) {
-            $ruleobject->ruledata->cancelrules = []; // Should be defined explicitly.
-        }
-        if (!empty($ruledraft->cancelrules)) {
-            $cancelrules = explode(',', $ruledraft->cancelrules);
-            foreach ($cancelrules as $cancelrule) {
+        // Fix rule overriding - convert all rulenames to IDs.
+        foreach ($ruleobject->ruledata->cancelrules as $key => $cancelrule) {
+            if (!empty($cancelrule) && !is_numeric($cancelrule)) {
                 if ($ruleid = $this->get_rule($cancelrule)) {
-                    $ruleobject->ruledata->cancelrules[] = $ruleid;
+                    $ruleobject->ruledata->cancelrules[$key] = $ruleid;
                 }
             }
         }
@@ -407,6 +450,82 @@ class mod_booking_generator extends testing_module_generator {
     }
 
     /**
+     * Function to create a dummy student's answer on option.
+     *
+     * @param ?array|stdClass $record
+     * @return void
+     */
+    public function create_action($record = null) {
+        global $DB;
+
+        $record = (object) $record;
+        $settings = singleton_service::get_instance_of_booking_option_settings($record->optionid);
+
+        $record->id = 0;
+        $record->cmid = $settings->cmid;
+
+        $boactiondata = json_decode($record->boactionjson);
+        unset($record->boactionjson);
+
+        if (!empty($boactiondata)) {
+            switch ($record->action_type) {
+                case 'bookotheroptions':
+                    $record->bookotheroptionsforce = $boactiondata->bookotheroptionsforce ?? 7;
+                    foreach ($boactiondata->otheroptions as $optionname) {
+                        if (!$id = $DB->get_field('booking_options', 'id', ['text' => $optionname])) {
+                            throw new Exception('The specified booking option with name text "' . $optionname . '" does not exist');
+                        }
+                        $record->bookotheroptionsselect[] = $id;
+                    }
+                    break;
+                case 'userprofilefield':
+                    $record->boactionselectuserprofilefield = $boactiondata->boactionselectuserprofilefield ?? "";
+                    $record->boactionuserprofileoperator = $boactiondata->boactionuserprofileoperator ?? "";
+                    $record->boactionuserprofilefieldvalue = $boactiondata->boactionuserprofilefieldvalue ?? "";
+                    break;
+                case 'cancelbooking':
+                    $record->boactioncancelbooking = $boactiondata->boactioncancelbooking ?? 0;
+                    break;
+            }
+            actions_info::save_action($record);
+        }
+    }
+
+    /**
+     * This creates a show only one table via the view page.
+     *
+     * @param mixed $optionid
+     *
+     * @return array
+     *
+     */
+    public function create_table_for_one_option($optionid) {
+
+        $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+        $booking = singleton_service::get_instance_of_booking_by_cmid($settings->cmid);
+
+        $view = new view($settings->cmid, 'showonlyone', $settings->id);
+
+        // Create the table.
+        $showonlyonetable = new bookingoptions_wbtable("cmid_{$settings->cmid}_optionid_{$optionid} showonlyonetable");
+
+        $wherearray = [
+            'bookingid' => (int) $booking->id,
+            'id' => $optionid,
+        ];
+        [$fields, $from, $where, $params, $filter] =
+                booking::get_options_filter_sql(0, 0, '', null, $booking->context, [], $wherearray);
+        $showonlyonetable->set_filter_sql($fields, $from, $where, $filter, $params);
+
+        // Initialize the default columnes, headers, settings and layout for the table.
+        // In the future, we can parametrize this function so we can use it on many different places.
+        $view->wbtable_initialize_layout($showonlyonetable, false, false, false);
+        $showonlyonetable->printtable(10, true);
+
+        return $showonlyonetable->rawdata ?? [];
+    }
+
+    /**
      * Function, to get userid
      * @param string $username
      * @return int
@@ -429,7 +548,7 @@ class mod_booking_generator extends testing_module_generator {
         global $DB;
 
         $param = '\"name\":\"' . $rulename . '\"';
-        $sql = 'SELECT id FROM {booking_rules} WHERE rulejson LIKE \'%'. $param .'%\'';
+        $sql = 'SELECT id FROM {booking_rules} WHERE rulejson LIKE \'%' . $param . '%\'';
         if (!$id = $DB->get_field_sql($sql)) {
             throw new Exception('The specified rule with name "' . $rulename . '" does not exist');
         }

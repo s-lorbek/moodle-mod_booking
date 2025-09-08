@@ -65,13 +65,33 @@ class selectusers implements bo_condition {
     public $customsettings = null;
 
     /**
+     * Singleton instance.
+     *
+     * @var object
+     */
+    private static $instance = null;
+
+    /**
+     * Singleton instance.
+     *
+     * @param ?int $id
+     * @return object
+     *
+     */
+    public static function instance(?int $id = null): object {
+        if (empty(self::$instance)) {
+            self::$instance = new self($id);
+        }
+        return self::$instance;
+    }
+
+    /**
      * Constructor.
      *
      * @param ?int $id
      * @return void
      */
-    public function __construct(?int $id = null) {
-
+    private function __construct(?int $id = null) {
         if ($id) {
             $this->id = $id;
         }
@@ -116,7 +136,10 @@ class selectusers implements bo_condition {
         // This is the return value. Not available to begin with.
         $isavailable = false;
 
-        if (!isset($this->customsettings->userids)) {
+        if (
+            !isset($this->customsettings->userids)
+            || empty($this->customsettings->userids)
+        ) {
             $isavailable = true;
         } else {
             // Users have been set in condition.
@@ -142,10 +165,10 @@ class selectusers implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -283,7 +306,7 @@ class selectusers implements bo_condition {
                     if (!empty($jsonconditions)) {
                         foreach ($jsonconditions as $jsoncondition) {
                             $currentclassname = $jsoncondition->class;
-                            $currentcondition = new $currentclassname();
+                            $currentcondition = $currentclassname::instance();
                             // Currently conditions of the same type cannot be combined with each other.
                             if ($jsoncondition->id != $this->id
                                 && isset($currentcondition->overridable)
@@ -339,7 +362,10 @@ class selectusers implements bo_condition {
 
         $conditionobject = new stdClass();
 
-        if (!empty($fromform->bo_cond_selectusers_restrict)) {
+        if (
+            !empty($fromform->bo_cond_selectusers_restrict)
+            && !empty($fromform->bo_cond_selectusers_userids)
+        ) {
             // Remove the namespace from classname.
             $classname = __CLASS__;
             $classnameparts = explode('\\', $classname);

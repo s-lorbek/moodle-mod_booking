@@ -70,7 +70,9 @@ class shoppingcart extends field_base {
      * Additionally to the classname, there might be others keys which should instantiate this class.
      * @var array
      */
-    public static $alternativeimportidentifiers = [];
+    public static $alternativeimportidentifiers = [
+        'sch_allowinstallment',
+    ];
 
     /**
      * This is an array of incompatible field ids.
@@ -201,7 +203,8 @@ class shoppingcart extends field_base {
         field_base $self,
         $mockdata = '',
         string $key = '',
-        $value = ''): array {
+        $value = ''
+    ): array {
 
         if (!isset($self)) {
             return [];
@@ -226,15 +229,18 @@ class shoppingcart extends field_base {
                 $oldvalue = $mockdata->$key;
             }
 
-            if ($oldvalue != $newvalue
-                && !(empty($oldvalue) && empty($newvalue))) {
+            if (
+                $oldvalue != $newvalue
+                && !(empty($oldvalue) && empty($newvalue))
+                ) {
                     // If change was found in any of the shoppingcart fields, return this generic information.
                     return [
                         'changes' => [
                             'fieldname' => 'shoppingcart',
                         ],
-                        ];
+                    ];
             }
+            // TODO: Track changes for each key like in customfields / pollurl.
         }
         // No changes were found, so array is empty.
         return [];

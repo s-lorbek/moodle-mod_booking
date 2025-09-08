@@ -49,7 +49,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class customform_form extends dynamic_form {
-
     /** @var int $id */
     private $id = null;
 
@@ -208,7 +207,7 @@ class customform_form extends dynamic_form {
                                     $ba = singleton_service::get_instance_of_booking_answers($settings);
                                     $expectedvalue = $linearray[0];
                                     $filteredba = array_filter(
-                                        $ba->usersonlist,
+                                        $ba->get_usersonlist(),
                                         function ($userbookings) use ($identifier, $expectedvalue) {
                                             return isset($userbookings->$identifier)
                                                     && $userbookings->$identifier === $expectedvalue;
@@ -232,10 +231,10 @@ class customform_form extends dynamic_form {
                                         $customformstore = new customformstore(
                                             (int) $formdata['userid'],
                                             (int) $formdata['id']
-                                            );
-                                        $price = $customformstore->get_price_and_currency_for_user($linearray[3]);
-                                        if (!empty($price)) {
-                                            $priceinfostring = ' (+' . $price . ')';
+                                        );
+                                        $priceandcurrency = $customformstore->get_price_and_currency_for_user($linearray[3]);
+                                        if (!empty($priceandcurrency)) {
+                                            $priceinfostring = ' (+' . $priceandcurrency . ')';
                                         }
                                     }
                                     // Append infos to select.
@@ -294,6 +293,34 @@ class customform_form extends dynamic_form {
                         );
                         $mform->setDefault('customform_enrolusersaction_' . $counter, $formelementvalue->value);
                         $mform->setType('customform_enrolusersaction_' . $counter, PARAM_TEXT);
+                        $mform->addElement(
+                            'advcheckbox',
+                            'customform_enroluserwhobookedcheckbox_' . $formelementvalue->formtype . '_' . $counter,
+                            get_string('enroluserwhobookedtocourse', 'mod_booking'),
+                            get_string('applyuserwhobookedcheckbox', 'mod_booking')
+                        );
+                        $mform->setDefault(
+                            'customform_enroluserwhobookedcheckbox_' . $formelementvalue->formtype . '_' . $counter,
+                            1
+                        );
+                        $mform->addElement(
+                            'static',
+                            'infoenroluserwhobookedstatic',
+                            '',
+                            get_string('enroluserwhobookedtocoursewarning', 'mod_booking')
+                        );
+                        $mform->hideIf(
+                            'infoenroluserwhobookedstatic',
+                            $identifier,
+                            'neq',
+                            '1'
+                        );
+                        $mform->hideIf(
+                            'infoenroluserwhobookedstatic',
+                            'customform_enroluserwhobookedcheckbox_' . $formelementvalue->formtype . '_' . $counter,
+                            'neq',
+                            '1'
+                        );
                 }
 
                 $counter++;

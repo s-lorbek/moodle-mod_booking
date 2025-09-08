@@ -40,7 +40,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class send_completion_mails extends \core\task\adhoc_task {
-
     /**
      * Data for sending mail
      *
@@ -61,16 +60,24 @@ class send_completion_mails extends \core\task\adhoc_task {
      */
     public function execute() {
 
+        if (empty(get_config('booking', 'uselegacymailtemplates'))) {
+            mtrace("Legacy mails are turned off, this task should be deactivated.");
+            return;
+        }
+
         $taskdata = $this->get_custom_data();
 
         mtrace('send_completion_mails task: sending completion mail to user with id: ' . $taskdata->userid);
 
         if ($taskdata != null) {
-
             // Use message controller to send the completion message.
             $messagecontroller = new message_controller(
-                MOD_BOOKING_MSGCONTRPARAM_SEND_NOW, MOD_BOOKING_MSGPARAM_COMPLETED,
-                $taskdata->cmid, $taskdata->optionid, $taskdata->userid, null
+                MOD_BOOKING_MSGCONTRPARAM_SEND_NOW,
+                MOD_BOOKING_MSGPARAM_COMPLETED,
+                $taskdata->cmid,
+                $taskdata->optionid,
+                $taskdata->userid,
+                null
             );
 
             if ($messagecontroller->send_or_queue()) {
@@ -80,10 +87,10 @@ class send_completion_mails extends \core\task\adhoc_task {
                 mtrace('send_completion_mails task: mail could not be sent to user with userid: '
                         . $taskdata->userid);
             }
-
         } else {
             throw new \coding_exception(
-                    'Completion email was not sent due to lack of custom message data.');
+                'Completion email was not sent due to lack of custom message data.'
+            );
         }
     }
 }

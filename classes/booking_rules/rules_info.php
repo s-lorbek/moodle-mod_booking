@@ -27,6 +27,8 @@ namespace mod_booking\booking_rules;
 
 use context;
 use context_module;
+use core_component;
+use core_plugin_manager;
 use dml_exception;
 use context_system;
 use mod_booking\local\templaterule;
@@ -99,28 +101,59 @@ class rules_info {
         $buttonargs = ['class' => 'd-none'];
 
         $mform->registerNoSubmitButton('btn_bookingruletemplates');
-        $mform->addElement('select', 'bookingruletemplate',
-              get_string('bookingruletemplates', 'mod_booking'), $templates);
-        $mform->addElement('submit', 'btn_bookingruletemplates',
-              get_string('bookingruletemplates', 'mod_booking'), $buttonargs);
+        $mform->addElement(
+            'select',
+            'bookingruletemplate',
+            get_string('bookingruletemplates', 'mod_booking'),
+            $templates
+        );
+        $mform->addElement(
+            'submit',
+            'btn_bookingruletemplates',
+            get_string('bookingruletemplates', 'mod_booking'),
+            $buttonargs
+        );
         $mform->setType('btn_bookingruletemplates', PARAM_NOTAGS);
 
         if (has_capability('mod/booking:manageoptiontemplates', context_system::instance())) {
-            $mform->addElement('advcheckbox', 'useastemplate',
-                get_string('bookinguseastemplate', 'mod_booking'));
+            $mform->addElement(
+                'advcheckbox',
+                'useastemplate',
+                get_string('bookinguseastemplate', 'mod_booking')
+            );
         }
+        $mform->addElement(
+            'advcheckbox',
+            'ruleisactive',
+            get_string('bookingruleapply', 'mod_booking'),
+            get_string('bookingruleapplydesc', 'mod_booking'),
+            null,
+            null,
+            [0, 1]
+        );
+        // Fetch data for default value.
+        $active = (isset($ajaxformdata['isactive']) && empty($ajaxformdata['isactive'])) ? 0 : 1;
+        $mform->setDefault('ruleisactive', $active);
 
         $mform->registerNoSubmitButton('btn_bookingruletype');
-        $mform->addElement('select', 'bookingruletype',
-            get_string('bookingrule', 'mod_booking'), $rulesforselect);
-        $mform->addElement('submit', 'btn_bookingruletype',
-            get_string('bookingrule', 'mod_booking'), $buttonargs);
+        $mform->addElement(
+            'select',
+            'bookingruletype',
+            get_string('bookingrule', 'mod_booking'),
+            $rulesforselect
+        );
+        $mform->addElement(
+            'submit',
+            'btn_bookingruletype',
+            get_string('bookingrule', 'mod_booking'),
+            $buttonargs
+        );
         $mform->setType('btn_bookingruletype', PARAM_NOTAGS);
 
         if (isset($ajaxformdata['bookingruletype'])) {
             $rule = self::get_rule($ajaxformdata['bookingruletype']);
         } else {
-            list($rule) = $rules;
+            [$rule] = $rules;
         }
 
         // We skip if no rule was selected.
@@ -128,7 +161,7 @@ class rules_info {
             return;
         }
 
-        $rule->add_rule_to_mform($mform, $repeateloptions);
+        $rule->add_rule_to_mform($mform, $repeateloptions, $ajaxformdata);
 
         $mform->addElement('html', '<hr>');
 
@@ -165,7 +198,18 @@ class rules_info {
                 $rules[] = $instance;
             }
         }
-
+        foreach (core_plugin_manager::instance()->get_plugins_of_type('bookingextension') as $plugin) {
+            $classes = core_component::get_component_classes_in_namespace(
+                "bookingextension_{$plugin->name}",
+                'rules\\rules'
+            );
+            foreach ($classes as $classname => $path) {
+                if (class_exists($classname)) {
+                          $instance = new $classname();
+                          $rules[] = $instance;
+                }
+            }
+        }
         return $rules;
     }
 
@@ -175,14 +219,17 @@ class rules_info {
      * @return mixed
      */
     public static function get_rule(string $rulename) {
-
         $filename = 'mod_booking\\booking_rules\\rules\\' . $rulename;
-
         // We instantiate all the classes, because we need some information.
         if (class_exists($filename)) {
             return new $filename();
         }
-
+        foreach (core_plugin_manager::instance()->get_plugins_of_type('bookingextension') as $plugin) {
+            $classname = "\\bookingextension_{$plugin->name}\\rules\\rules\\{$rulename}";
+            if (class_exists($classname)) {
+                return new $classname();
+            }
+        }
         return null;
     }
 
@@ -201,8 +248,13 @@ class rules_info {
             return new stdClass();
         }
 
-        // If we have an ID, we retrieve the right rule from DB.
-        $record = $DB->get_record('booking_rules', ['id' => $data->id]);
+        if ($data->id < 0) {
+            // We get the value from the predefined templates.
+            $record = templaterule::get_template_record_by_id($data->id);
+        } else {
+            // If we have an ID, we retrieve the right rule from DB.
+            $record = $DB->get_record('booking_rules', ['id' => $data->id]);
+        }
 
         $data->contextid = $record->contextid;
 
@@ -215,6 +267,7 @@ class rules_info {
 
         // These function just add their bits to the object.
         $data->useastemplate = $record->useastemplate;
+        $data->ruleisactive = isset($record->ruleisactive) ? $record->ruleisactive : 1;
         $condition->set_defaults($data, $record);
         $action->set_defaults($data, $record);
         $rule->set_defaults($data, $record);
@@ -288,7 +341,11 @@ class rules_info {
         // Eventbased rules don't have to be reapplied.
         if ($records = booking_rules::get_list_of_saved_rules_by_context($contextid, '')) {
             foreach ($records as $record) {
-                if ($record->rulename != 'rule_daysbefore') {
+                if (empty($record->isactive)) {
+                    continue;
+                }
+
+                if ($record->rulename === 'rule_react_on_event') {
                     continue;
                 }
 
@@ -348,7 +405,10 @@ class rules_info {
         $data = $event->get_data();
 
         // Check if rule is from booking plugin or another.
-        if ($data['component'] !== 'mod_booking') {
+        if (
+            $data['component'] !== 'mod_booking' &&
+            strpos($data['component'], 'bookingextension_') !== 0
+            ) {
             if (!self::proceed_with_event($event, $data)) {
                 return;
             };
@@ -360,9 +420,11 @@ class rules_info {
         $contextid = $event->contextid;
         $records = booking_rules::get_list_of_saved_rules_by_context($contextid, $eventname);
 
+        // There are cases where an event is triggered twice in a very narrow timespan.
+        $data['timecreated'] = strtotime(date('Y-m-d H:00:00', ($data['timecreated'] ?? time()) + 3600));
+
         // Now we check all the existing rules from booking.
         foreach ($records as $record) {
-            // TODO this needs to be updated: Maybe rulename with namespace from event.
             $rule = self::get_rule($record->rulename);
 
             // THIS is the place where we need to add event data to the rulejson!
@@ -408,11 +470,15 @@ class rules_info {
         foreach ($allrules as $ruleid => $rulearray) {
             // Run through all the excluded rules of this array and unset them.
             $rule = $rulearray['rule'];
+
+            if (empty($rule->ruleisactive)) {
+                // Inactive rules can't exculde others.
+                continue;
+            }
             $ruleobject = json_decode($rule->rulejson);
             $ruledata = $ruleobject->ruledata;
             if (!empty($ruledata->cancelrules)) {
                 foreach ($ruledata->cancelrules as $cancelrule) {
-
                     foreach ($rulestoexecute as $key => $rulearray) {
                         if ($rulearray['ruleid'] == $cancelrule) {
                             unset($rulestoexecute[$key]);
@@ -425,6 +491,10 @@ class rules_info {
 
         foreach ($rulestoexecute as $key => $rulearray) {
             $rule = $rulearray['rule'];
+            if (empty($rule->ruleisactive)) {
+                // Inactive rules are not executed.
+                continue;
+            }
             // Make sure we don't execute this multiple times.
             unset($rulestoexecute[$key]);
             unset(self::$rulestoexecute[$key]);
@@ -476,5 +546,16 @@ class rules_info {
             unset(self::$eventstoexecute[$key]);
             $event();
         }
+    }
+
+    /**
+     * Destroy all singletons.
+     *
+     * @return void
+     *
+     */
+    public static function destroy_singletons() {
+        self::$rulestoexecute = [];
+        self::$eventstoexecute = [];
     }
 }

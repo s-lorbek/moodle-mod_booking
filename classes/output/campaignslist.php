@@ -38,7 +38,6 @@ use templatable;
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class campaignslist implements renderable, templatable {
-
     /** @var array $campaigns */
     public $campaigns = [];
 
@@ -149,7 +148,12 @@ class campaignslist implements renderable, templatable {
                     break;
                 default:
             }
-            $b->cpvalue = $campaignobj->cpvalue ?? "";
+            if (is_array($campaignobj->cpvalue)) {
+                $b->cpvalue = implode(', ', $campaignobj->cpvalue);
+            } else {
+                $b->cpvalue = $campaignobj->cpvalue;
+            }
+
             $data['cpfield'] = get_string('campaigndescriptioncpvalue', 'mod_booking', $b);
         }
 
@@ -165,7 +169,6 @@ class campaignslist implements renderable, templatable {
                 array_values($data)[1];
             default:
                 return "";
-
         }
     }
 }

@@ -28,6 +28,7 @@ use mod_booking\booking_option;
 use mod_booking\booking_option_settings;
 use mod_booking\option\fields_info;
 use mod_booking\option\field_base;
+use mod_booking\option\time_handler;
 use mod_booking\singleton_service;
 use MoodleQuickForm;
 use stdClass;
@@ -135,7 +136,8 @@ class canceluntil extends field_base {
 
         $mform->addElement('advcheckbox', 'canceluntilcheckbox', get_string('canceluntil', 'mod_booking'));
         $mform->disabledIf('canceluntilcheckbox', 'disablecancel', 'checked');
-        $mform->addElement('date_time_selector', 'canceluntil', '');
+        $mform->addElement('date_time_selector', 'canceluntil', '', time_handler::set_timeintervall());
+        $mform->setDefault('canceluntil', time_handler::prettytime(time()));
         $mform->disabledIf('canceluntil', 'canceluntilcheckbox');
         $mform->setType('canceluntil', PARAM_INT);
     }
@@ -219,13 +221,16 @@ class canceluntil extends field_base {
                 $oldvalue = "";
             }
 
-            if ($oldvalue != $newvalue
-                && !(empty($oldvalue) && empty($newvalue))) {
+            if (
+                $oldvalue != $newvalue
+                && !(empty($oldvalue) && empty($newvalue))
+            ) {
                 $changes = [
                     'changes' => [
                         'fieldname' => $classname,
                         'oldvalue' => $oldvalue,
                         'newvalue' => $newvalue,
+                        'formkey' => 'canceluntil',
                     ],
                 ];
             }

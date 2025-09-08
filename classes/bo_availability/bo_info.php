@@ -31,12 +31,8 @@ use mod_booking\booking;
 use mod_booking\booking_bookit;
 use mod_booking\booking_context_helper;
 use mod_booking\booking_option_settings;
-use mod_booking\local\modechecker;
-use mod_booking\output\bookingoption_description;
 use mod_booking\output\button_notifyme;
 use mod_booking\output\col_price;
-use mod_booking\output\prepagemodal;
-use mod_booking\output\simple_modal;
 use mod_booking\price;
 use mod_booking\singleton_service;
 use moodle_exception;
@@ -67,7 +63,6 @@ define('MOD_BOOKING_BO_PREPAGE_POSTBOOK', 3); // This should be after the bookit
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class bo_info {
-
     /** @var bool Visibility flag (eye icon) */
     protected $visible;
 
@@ -92,7 +87,6 @@ class bo_info {
 
         $this->optionid = $settings->id;
         $this->userid = $USER->id;
-
     }
 
     /**
@@ -118,8 +112,12 @@ class bo_info {
      * @param bool $noblockingpages
      * @return array [isavailable, description]
      */
-    public function is_available(?int $optionid = null, int $userid = 0, bool $hardblock = false,
-        bool $noblockingpages = false): array {
+    public function is_available(
+        ?int $optionid = null,
+        int $userid = 0,
+        bool $hardblock = false,
+        bool $noblockingpages = false
+    ): array {
 
         if (!$optionid) {
             $optionid = $this->optionid;
@@ -137,15 +135,27 @@ class bo_info {
             foreach ($results as $result) {
                 // If no Id has been defined or if id is higher, we take the descpription to return.
                 if ($id === MOD_BOOKING_BO_COND_CONFIRMATION || $result['id'] > $id) {
-                    if (class_exists('local_shopping_cart\shopping_cart')
-                        && has_capability('local/shopping_cart:cashier', context_system::instance()) &&
-                        $result['button'] == MOD_BOOKING_BO_BUTTON_MYALERT) {
+                    $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+                    if (
+                        (
+                            (
+                                class_exists('local_shopping_cart\shopping_cart')
+                                && has_capability('local/shopping_cart:cashier', context_system::instance())
+                            )
+                            // This check actually corresponds to the check in booking_bookit currently line 126.
+                            // It allows overriding a blocking condition under some circumstances.
+                            || has_capability('mod/booking:bookforothers', context_module::instance($settings->cmid))
+                        )
+                        && $result['button'] == MOD_BOOKING_BO_BUTTON_MYALERT
+                    ) {
                         continue;
                     }
                     // Pages should not block the "allow_add_item_to_cart" function if $noblockingpages is true.
-                    if ($noblockingpages &&
+                    if (
+                        $noblockingpages &&
                         ($result['insertpage'] == MOD_BOOKING_BO_PREPAGE_PREBOOK ||
-                        $result['insertpage'] == MOD_BOOKING_BO_PREPAGE_POSTBOOK)) {
+                        $result['insertpage'] == MOD_BOOKING_BO_PREPAGE_POSTBOOK)
+                    ) {
                         continue;
                     }
                     $description = $result['description'];
@@ -155,7 +165,6 @@ class bo_info {
         }
 
         return [$id, $isavailable, $description];
-
     }
 
     /**
@@ -210,14 +219,13 @@ class bo_info {
         Hardcoded conditions are in instantiated classes whereas JSON conditions are in stdclasses.
         They come from the field 'availability' field of the booking options table. */
         while (count($conditions) > 0) {
-
             $condition = array_shift($conditions);
 
             $classname = get_class($condition);
 
             // First, we have the hardcoded conditions already as instances.
             if ($classname !== 'stdClass') {
-                list($isavailable, $description, $insertpage, $button)
+                [$isavailable, $description, $insertpage, $button]
                     = $condition->get_description($settings, $userid, $full);
 
                 if (!$isavailable && $onlyhardblock) {
@@ -239,20 +247,22 @@ class bo_info {
                 $classname = 'mod_booking\bo_availability\conditions\\' . $condition->name;
 
                 if (class_exists($classname)) {
-
                     // We now set the id from the json for this instance.
                     // We might actually use a hardcoded condition with a negative id...
                     // ... also as customized condition with positive id.
-                    $instance = new $classname($condition->id);
+                    if (method_exists($classname, 'instance')) {
+                        $instance = $classname::instance($condition->id);
+                    } else {
+                        $instance = new $classname($condition->id);
+                    }
                     $instance->customsettings = $condition;
-
                 } else {
                     // Should never happen, but just go on in case of.
                     continue;
                 }
                 /* The get description function returns availability, description,
                 insertpage (int param for prepagemodal provided) and the button. */
-                list($isavailable, $description, $insertpage, $button) = $instance->get_description($settings, $userid, $full);
+                [$isavailable, $description, $insertpage, $button] = $instance->get_description($settings, $userid, $full);
 
                 if (!$isavailable && $onlyhardblock) {
                     // If we only want hard blocks, we might want to override the result of the is_available function.
@@ -279,7 +289,6 @@ class bo_info {
 
         // Now we might need to override the result of a previous condition which has been resolved as false before.
         foreach ($overrideconditions as $condition) {
-
             // As we manipulate this value, we have to keep the original value.
             $resultsarray[$condition->id]['isavailable:original'] = $resultsarray[$condition->id]['isavailable'];
 
@@ -294,8 +303,10 @@ class bo_info {
                             // If one of the two results is true, both are true.
                             if (isset($resultsarray[$ocid])) {
                                 $overrideswithkeys = array_flip($resultsarray[$ocid]['condition']->overrides ?? []);
-                                if (!$resultsarray[$ocid]['reciprocal'] ||
-                                    isset($overrideswithkeys[$condition->id])) {
+                                if (
+                                    !$resultsarray[$ocid]['reciprocal'] ||
+                                    isset($overrideswithkeys[$condition->id])
+                                ) {
                                     if ($resultsarray[$ocid]['isavailable']) {
                                         $resultsarray[$condition->id]['isavailable'] = true;
                                     }
@@ -323,8 +334,10 @@ class bo_info {
                                 }
                             }
                             // Only now: If NOT both are true, we set both to false.
-                            if (!($resultsarray[$ocid]['isavailable']
-                                && $resultsarray[$condition->id]['isavailable'])) {
+                            if (
+                                !($resultsarray[$ocid]['isavailable']
+                                && $resultsarray[$condition->id]['isavailable'])
+                            ) {
                                     $resultsarray[$condition->id]['isavailable'] = false;
                                     // Both get the same descripiton.
                                     // if one of them bubbles up as the blocking one, we see the right description.
@@ -370,6 +383,7 @@ class bo_info {
         if (is_null($this->availability)) {
             return '';
         }
+        return '';
     }
 
     /**
@@ -417,9 +431,13 @@ class bo_info {
     public static function set_defaults(stdClass &$defaultvalues, $jsonobject) {
 
         foreach ($jsonobject as $conditionobject) {
-
             $classname = $conditionobject->class;
-            $condition = new $classname($conditionobject->id);
+            if (method_exists($classname, 'instance')) {
+                $condition = $classname::instance($conditionobject->id);
+            } else {
+                $condition = new $classname($conditionobject->id);
+            }
+
             $condition->set_defaults($defaultvalues, $conditionobject);
         }
     }
@@ -480,10 +498,10 @@ class bo_info {
 
     /**
      * Add the sql from the conditions.
-     *
+     * @param int $userid
      * @return array
      */
-    public static function return_sql_from_conditions() {
+    public static function return_sql_from_conditions(int $userid) {
         global $PAGE;
         // First, we get all the relevant conditions.
         $conditions = self::get_conditions(MOD_BOOKING_CONDPARAM_MFORM_ONLY);
@@ -493,17 +511,29 @@ class bo_info {
         $paramsarray = [];
 
         $cm = $PAGE->cm;
-        if ($cm && ((has_capability('mod/booking:updatebooking', $cm->context)))) {
+        if (
+            (
+                class_exists('local_shopping_cart\shopping_cart')
+                && has_capability('local/shopping_cart:cashier', context_system::instance())
+            )
+            || (
+                $cm
+                && (has_capability('mod/booking:updatebooking', $cm->context))
+            )
+        ) {
             // With this capability, ignore filter for sql check.
             // Because of missing $cm this will not work for display outside a course i.e. in shortcodes display.
             // A teacher would not see hidden bookingconditions on startpage but in courselist they would be displayed.
             return ['', '', '', [], ''];
         }
         foreach ($conditions as $class) {
+            if (method_exists($class, 'instance')) {
+                $condition = $class::instance();
+            } else {
+                $condition = new $class();
+            }
 
-            $condition = new $class();
-
-            list($select, $from, $filter, $params, $where) = $condition->return_sql();
+            [$select, $from, $filter, $params, $where] = $condition->return_sql($userid);
 
             $selectall .= $select;
             $fromall .= $from;
@@ -512,14 +542,28 @@ class bo_info {
                 $wherearray[] = $where;
             }
             $paramsarray = array_merge($paramsarray, $params);
-
         }
 
         $where = implode(" AND ", $wherearray);
 
+        // For booked users, we don't want to apply all of these conditions.
+        if (!empty($userid)) {
+            // If we look at the table for booked users, we ant to bypass the restriction.
+            // If the user is already booked.
+            $bypass = "EXISTS (
+                        SELECT 1 FROM {booking_answers} ba
+                        WHERE ba.optionid = optionid
+                        AND ba.userid = :bookeduserbypass
+                        AND ba.waitinglist < 5
+                    ) OR ";
+            $paramsarray['bookeduserbypass'] = $userid;
+        } else {
+            $bypass = "";
+        }
+
         // For performance reason we have a flag if we need to check the value at all.
         $where = " (
-                        sqlfilter < 1 OR (
+                        sqlfilter < 1 OR $bypass (
                             $where
                             )
                         )
@@ -554,7 +598,11 @@ class bo_info {
 
             // We instantiate all the classes, because we need some information.
             if (class_exists($filename)) {
-                $instance = new $filename();
+                if (method_exists($filename, 'instance')) {
+                    $instance = $filename::instance();
+                } else {
+                    $instance = new $filename();
+                }
 
                 switch ($condparam) {
                     case MOD_BOOKING_CONDPARAM_HARDCODED_ONLY:
@@ -664,14 +712,14 @@ class bo_info {
                 if (class_exists('local_shopping_cart\shopping_cart')) {
                     shopping_cart::add_item_to_cart('mod_booking', 'option', $optionid, $userid);
                 } else {
-                    throw new moodle_exception('tousepriceinstallshoppingcart', 'mod_booking');
+                    throw new moodle_exception('error:tousepriceinstallshoppingcart', 'mod_booking');
                 }
             }
         }
 
         // We throw an exception if we didn't get a valid pagenumber.
         if (empty($condition)) {
-            throw new moodle_exception('wrongpagenumberforprebookingpage', 'mod_booking');
+            throw new moodle_exception('error:wrongpagenumberforprebookingpage', 'mod_booking');
         }
 
         $data = self::return_data_for_steps($conditions, $pagenumber);
@@ -679,7 +727,11 @@ class bo_info {
         $template = 'mod_booking/bookingpage/header';
 
         // We get the condition for the right page.
-        $condition = new $condition();
+        if (method_exists($condition, 'instance')) {
+            $condition = $condition::instance();
+        } else {
+            $condition = new $condition();
+        }
         $object = $condition->render_page($optionid, $userid ?? 0);
 
         // Now we introduce the header at the first place.
@@ -723,18 +775,20 @@ class bo_info {
      * @param bool $modalfordescription
      */
     public static function render_conditionmessage(
-            string $description,
-            string $style = 'warning',
-            int $optionid = 0,
-            bool $showprice = false,
-            ?stdClass $optionvalues = null,
-            bool $shownotificationlist = false,
-            ?stdClass $usertobuyfor = null,
-            bool $modalfordescription = false) {
+        string $description,
+        string $style = 'warning',
+        int $optionid = 0,
+        bool $showprice = false,
+        ?stdClass $optionvalues = null,
+        bool $shownotificationlist = false,
+        ?stdClass $usertobuyfor = null,
+        bool $modalfordescription = false
+    ) {
 
         global $PAGE;
 
         $renderedstring = '';
+        /** @var \mod_booking\output\renderer $output */
         $output = $PAGE->get_renderer('mod_booking');
         if (!empty($optionid)) {
             $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
@@ -756,15 +810,19 @@ class bo_info {
         // Show price and add to cart button.
         if ($showprice && !empty($optionvalues) && $optionid && !empty($usertobuyfor)) {
             $data = new col_price($optionvalues, $settings, $usertobuyfor, $context);
+            booking::convert_prices_to_number_format($data);
             $renderedstring .= $output->render_col_price($data);
         }
 
-        // If notification list ist turned on, we show the "notify-me" button.
+        // If notification list is turned on, we show the "notify-me" button.
         if ($shownotificationlist && $optionid && $usertobuyfor->id) {
             $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
             $bookinginformation = $bookinganswer->return_all_booking_information($usertobuyfor->id);
-            $data = new button_notifyme($usertobuyfor->id, $optionid,
-                $bookinginformation['notbooked']['onnotifylist']);
+            $data = new button_notifyme(
+                $usertobuyfor->id,
+                $optionid,
+                $bookinginformation['notbooked']['onnotifylist']
+            );
 
             $renderedstring .= $output->render_notifyme_button($data);
         }
@@ -788,6 +846,7 @@ class bo_info {
      * @param string $dataaction
      * @param string $link
      * @param string $showicon
+     * @param array $showdetaildots
      * @return array
      */
     public static function render_button(
@@ -797,12 +856,13 @@ class bo_info {
         string $classes = 'alert alert-danger',
         bool $includeprice = false,
         bool $fullwidth = true,
-        string $role = 'alert',
+        string $role = '',
         string $area = 'option',
         bool $nojs = true,
         string $dataaction = '', // Use 'noforward' to disable automatic forwarding.
         string $link = '',
-        string $showicon = ''
+        string $showicon = '',
+        array $showdetaildots = []
     ) {
 
         global $PAGE;
@@ -833,6 +893,7 @@ class bo_info {
                 'class' => "$classes $extraclasses text-center",
                 'role' => $role,
             ],
+            'showdetaildots' => empty($showdetaildots) ? false : $showdetaildots,
         ];
 
         if (!empty($showicon)) {
@@ -849,20 +910,42 @@ class bo_info {
         if (
             (!has_capability('mod/booking:bookforothers', $context)
             || get_config('booking', 'bookonlyondetailspage'))
-            && $settings->useprice) {
-            $priceitems = price::get_price('option', $settings->id, $user);
-            if (count($priceitems) > 0) {
+            && $settings->useprice
+        ) {
+            $label = "";
+            if (
+                (!isloggedin()
+                || isguestuser())
+                && !empty($priceitems = self::return_sorted_priceitems($settings->id))
+                && get_config('booking', 'showpriceifnotloggedin')
+            ) {
+                foreach ($priceitems as $priceitem) {
+                    if (!empty($label)) {
+                        $label .= " / ";
+                    }
+                    $label .= format_float($priceitem['price'] ?? 0.0, 2);
+                }
+                $currstring = isset($priceitem["currency"]) ? " " .  $priceitem["currency"] : '';
+                $label .= $currstring;
+            } else if ($includeprice) {
+                $priceitem = price::get_price('option', $settings->id, $user);
                 if (
                     get_config('booking', 'priceisalwayson')
                     || !empty(get_config('booking', 'displayemptyprice'))
-                    || !empty((float)$priceitems["price"])
+                    || (isset($priceitem["price"]) && !empty((float)$priceitem["price"]))
                 ) {
-                    $data['sub'] = [
-                        'label' => $priceitems["price"] . " " . $priceitems["currency"],
-                        'class' => ' text-center ',
-                        'role' => '',
-                    ];
+                    $currstring = isset($priceitem["currency"]) ? " " .  $priceitem["currency"] : '';
+                    $label = format_float($priceitem['price'] ?? 0.0, 2);
+                    $label .= $currstring;
                 }
+            }
+
+            if (!empty($label)) {
+                $data['sub'] = [
+                    'label' => $label,
+                    'class' => ' text-center ',
+                    'role' => '',
+                ];
             }
         }
 
@@ -875,8 +958,8 @@ class bo_info {
         if ($includeprice && $settings->useprice) {
             if ($price = price::get_price('option', $settings->id, $user)) {
                 $data['price'] = [
-                    'price' => $price['price'],
-                    'currency' => $price['currency'],
+                    'price' => format_float($price['price'], 2),
+                    'currency' => $price['currency'] ?? '',
                 ];
             }
         }
@@ -884,8 +967,10 @@ class bo_info {
         // If user is on notification list, we need to show unsubscribe toggle bell.
         $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
         $bookinginformation = $bookinganswer->return_all_booking_information($userid);
-        if (isset($bookinginformation['notbooked']) && ($bookinginformation['notbooked']['onnotifylist']) ||
-            (isset($bookinginformation['iambooked']) && $bookinginformation['iambooked']['onnotifylist'])) {
+        if (
+            isset($bookinginformation['notbooked']) && ($bookinginformation['notbooked']['onnotifylist']) ||
+            (isset($bookinginformation['iambooked']) && $bookinginformation['iambooked']['onnotifylist'])
+        ) {
             $data['onlist'] = true;
         }
 
@@ -895,8 +980,42 @@ class bo_info {
             'mod_booking/bookit_button', // The template.
             $data, // The corresponding data object.
         ];
-
         return $returnarray;
+    }
+
+    /**
+     * Return priceitems.
+     *
+     * @param mixed $itemid
+     * @param int $userid
+     *
+     * @return array
+     *
+     */
+    private static function return_sorted_priceitems($itemid, $userid = 0): array {
+        $priceitems = price::get_prices_from_cache_or_db('option', $itemid, $userid);
+        $sortedpriceitems = [];
+        foreach ($priceitems as $priceitem) {
+            $pricecategory = price::get_active_pricecategory_from_cache_or_db($priceitem->pricecategoryidentifier);
+            if (!$pricecategory) {
+                continue;
+            }
+            $priceitemarray = (array)$priceitem;
+
+            if (!empty($pricecategory)) {
+                $priceitemarray['pricecategoryname'] = $pricecategory->name;
+                // Actually not yet sorted.
+                $sortedpriceitems[$pricecategory->pricecatsortorder] = $priceitemarray;
+            } else if (isset($priceitemarray['price'])) {
+                $sortedpriceitems[] = $priceitemarray;
+            }
+        }
+
+        // Now we sort the array according to the sort order defined in price categories.
+        ksort($sortedpriceitems);
+        // The mustache template cannot handle keys, so we remove them now.
+        $sortedpriceitems = array_values($sortedpriceitems);
+        return $sortedpriceitems;
     }
 
     /**
@@ -953,19 +1072,20 @@ class bo_info {
         // First, sort all the pages according to this system:
         // Depending on the MOD_BOOKING_BO_PREPAGE_x constant, we order them pre or post the real booking button.
         foreach ($results as $result) {
-
             if ($result['id'] === MOD_BOOKING_BO_COND_ASKFORCONFIRMATION) {
                 $askforconfirmation = true;
             }
 
-            if ($result['id'] === MOD_BOOKING_BO_COND_PRICEISSET &&
-                class_exists('local_shopping_cart\shopping_cart')) {
+            if (
+                $result['id'] === MOD_BOOKING_BO_COND_PRICEISSET &&
+                class_exists('local_shopping_cart\shopping_cart')
+            ) {
                 if (!$askforconfirmation) {
                     $showcheckout = true;
                 }
             }
 
-            // One no button condition tetermines this for all.
+            // One no button condition determines this for all.
             if ($result['button'] === MOD_BOOKING_BO_BUTTON_NOBUTTON) {
                 $showbutton = false;
             }
@@ -1035,7 +1155,6 @@ class bo_info {
         $data['tabs'] = [];
 
         foreach ($conditionsarray as $key => $value) {
-
             if (isset($value['showcheckout']) && $value['showcheckout'] == true) {
                 $name = 'checkout'; // So we'll get the string 'page:checkout'.
             } else {
@@ -1111,13 +1230,14 @@ class bo_info {
      * @return void
      */
     private static function add_continue_button(
-            array &$footerdata,
-            array $conditions,
-            array $results,
-            int $pagenumber,
-            int $totalpages,
-            int $optionid,
-            int $userid) {
+        array &$footerdata,
+        array $conditions,
+        array $results,
+        int $pagenumber,
+        int $totalpages,
+        int $optionid,
+        int $userid
+    ) {
 
         global $USER;
 
@@ -1129,12 +1249,20 @@ class bo_info {
         $continuelink = '#';
 
         $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+        $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($settings->cmid);
+
         $viewparam = booking::get_value_of_json_by_key($settings->bookingid, 'viewparam');
         $turnoffmodals = 0; // By default, we use modals.
+
+        // NOTE: If either cards view is set as viewparam or we have a template switcher containing the cards view...
+        // ...we cannot use inline modals as they are only supported by the list views currently!
+        // Todo: Implement inline modals for cards view.
         if (
-            $viewparam == MOD_BOOKING_VIEW_PARAM_LIST
-            || $viewparam = MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT
-            || $viewparam = MOD_BOOKING_VIEW_PARAM_LIST_IMG_RIGHT
+            ($viewparam != MOD_BOOKING_VIEW_PARAM_CARDS)
+            && !(
+                $bookingsettings->switchtemplates
+                && in_array(MOD_BOOKING_VIEW_PARAM_CARDS, $bookingsettings->switchtemplatesselection)
+            )
         ) {
             // Only if we use list view, we can use inline modals.
             // So only in this case, we need to check the config setting.
@@ -1148,7 +1276,6 @@ class bo_info {
                 $lastresultid = array_pop($results)['id'];
                 switch ($lastresultid) {
                     case MOD_BOOKING_BO_COND_ALREADYRESERVED:
-
                         // If we are not on the cashier site, do this.
                         if ($userid == $USER->id) {
                             $url = new moodle_url('/local/shopping_cart/checkout.php');
@@ -1194,19 +1321,22 @@ class bo_info {
      * @return void
      */
     private static function add_back_button(
-            array &$footerdata,
-            array $conditions,
-            array $results,
-            int $pagenumber,
-            int $totalpages) {
+        array &$footerdata,
+        array $conditions,
+        array $results,
+        int $pagenumber,
+        int $totalpages
+    ) {
 
         // Standardvalues.
         $backbutton = true;
         $backaction = 'back';
         $backlabel = get_string('back');
 
-        if ($pagenumber == 0 // If we are on the first page.
-            || $conditions[$pagenumber]['id'] === MOD_BOOKING_BO_COND_CONFIRMATION) { // If we are on the confirmation page.
+        if (
+            $pagenumber == 0 // If we are on the first page.
+            || $conditions[$pagenumber]['id'] === MOD_BOOKING_BO_COND_CONFIRMATION
+        ) { // If we are on the confirmation page.
             $backbutton = false;
         }
 
@@ -1216,26 +1346,63 @@ class bo_info {
     }
 
     /**
-     * Returns part of SQL-Query according to DB Family for a specified column and key.
+     * Returns part of an SQL query to extract a JSON key from a column based on the DB Family.
+     *
+     * @param string $dbcolumn The name of the column containing JSON data.
+     * @param string $jsonkey The key to extract from the JSON object.
+     * @param int $index
+     *
+     * @return string SQL snippet for extracting the JSON key.
+     */
+    public static function check_for_sqljson_key_in_array(string $dbcolumn, string $jsonkey, int $index = 0): string {
+        global $DB;
+
+        $databasetype = $DB->get_dbfamily();
+
+        switch ($databasetype) {
+            case 'postgres':
+                // PostgreSQL: Extract key from JSON array element at specified index.
+                return "(CAST($dbcolumn AS JSONB)->$index->>'" . addslashes($jsonkey) . "')";
+            case 'mysql':
+                // MySQL: Extract key from JSON array element at specified index.
+                return "JSON_UNQUOTE(JSON_EXTRACT($dbcolumn, '$[$index]." . addslashes($jsonkey) . "'))";
+            default:
+                throw new \moodle_exception('Unsupported database type for JSON key extraction.');
+        }
+    }
+
+    /**
+     * Returns part of an SQL query to extract a JSON key from a column based on the DB Family.
      *
      * @param string $dbcolumn
      * @param string $jsonkey
+     * @param string $type
      *
      * @return string
      *
      */
-    public static function check_for_sqljson_key(string $dbcolumn, string $jsonkey): string {
+    public static function check_for_sqljson_key_in_object(string $dbcolumn, string $jsonkey, string $type = 'text'): string {
         global $DB;
 
         $databasetype = $DB->get_dbfamily();
-        // The $key param is the name of the param in json.
+
         switch ($databasetype) {
             case 'postgres':
-                return " ($dbcolumn->>'$jsonkey')";
+                // PostgreSQL: Extract key from JSON object and cast to the desired type.
+                // Ensure that $type maps to valid PostgreSQL types like 'text', 'integer', etc.
+                return "($dbcolumn::jsonb ->> '" . addslashes($jsonkey) . "')::" . $type;
+
             case 'mysql':
-                return " JSON_EXTRACT($dbcolumn, '$jsonkey')";
+                // MySQL: Extract key from JSON object and cast to the desired type.
+                // Handle numeric or string-based types accordingly.
+                if (in_array(strtolower($type), ['int', 'integer', 'bigint', 'float', 'double', 'decimal'], true)) {
+                    return "CAST(JSON_EXTRACT($dbcolumn, '$." . addslashes($jsonkey) . "') AS UNSIGNED)";
+                } else {
+                    return "CAST(JSON_EXTRACT($dbcolumn, '$." . addslashes($jsonkey) . "') AS CHAR)";
+                }
+
             default:
-                return '';
+                throw new moodle_exception('Unsupported database type for JSON key extraction.');
         }
     }
 
@@ -1254,15 +1421,18 @@ class bo_info {
         if (!empty($settings->availability)) {
             $existingconditions = json_decode($settings->availability);
             foreach ($existingconditions as $existingcondition) {
-                $class = new $existingcondition->class();
+                $classname = $existingcondition->class;
+                if (method_exists($classname, 'instance')) {
+                    $class = $classname::instance();
+                } else {
+                    $class = new $classname();
+                }
                 if (method_exists($class, 'validation')) {
                     $class->validation($data, $files, $errors);
                 };
             }
-
         }
 
         return $errors;
     }
-
 }

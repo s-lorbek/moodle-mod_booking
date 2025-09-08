@@ -81,6 +81,8 @@ class optiondates extends field_base {
         'semesterid',
         'starddate',
         'enddate',
+        'optiondateid_0',
+        'optiondateid_1',
     ];
 
     /**
@@ -106,7 +108,7 @@ class optiondates extends field_base {
     ): array {
         // Run through all dates to make sure we don't have an array.
         // We need to transform dates to timestamps.
-        [$dates, $highesindex] = dates::get_list_of_submitted_dates((array)$formdata);
+        [$dates, $highestindex] = dates::get_list_of_submitted_dates((array)$formdata);
 
         foreach ($dates as $date) {
             $newoption->{'coursestarttime_' . $date['index']} = $date['coursestarttime'];
@@ -129,8 +131,19 @@ class optiondates extends field_base {
         }
 
         $newoption->dayofweektime = $formdata->dayofweektime ?? '';
-        $dayinfo = dates_handler::prepare_day_info($formdata->dayofweektime ?? '');
-        $newoption->dayofweek = $dayinfo['day'] ?? '';
+
+        // We now support multiple dayofweektime strings.
+        $dayofweektimestrings = dates_handler::split_and_trim_reoccurringdatestring($formdata->dayofweektime ?? '');
+        $weekdays = [];
+        if (!empty($dayofweektimestrings)) {
+            foreach ($dayofweektimestrings as $dayofweektime) {
+                $dayinfo = dates_handler::prepare_day_info($dayofweektime ?? '');
+                if (!empty($dayinfo['day'])) {
+                    $weekdays[] = $dayinfo['day'];
+                }
+            }
+        }
+        $newoption->dayofweek = implode(',', $weekdays);
         $newoption->semesterid = $formdata->semesterid ?? 0;
 
         // We can return a warning message here.
@@ -142,18 +155,19 @@ class optiondates extends field_base {
      * @param array $data
      * @param array $files
      * @param array $errors
+     * @return void
      */
-    public static function validation(array $data, array $files, array &$errors) {
+    public static function validation(array $data, array $files, array &$errors): void {
 
         // Run through all dates to make sure we don't have an array.
         // We need to transform dates to timestamps.
-        [$dates, $highesindex] = dates::get_list_of_submitted_dates($data);
+        [$dates, $highestindex] = dates::get_list_of_submitted_dates($data);
 
         $problems = array_filter($dates, fn($a) => $a['coursestarttime'] > $a['courseendtime']);
 
         foreach ($problems as $problem) {
             // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-            // TODO: Make it nice.
+            // Todo: Make it nice.
             $errors['courseendtime_' . $problem['index']] = get_string('problemwithdate', 'mod_booking');
         }
     }

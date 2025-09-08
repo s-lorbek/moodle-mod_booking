@@ -39,7 +39,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class responsiblecontact extends field_base {
-
     /**
      * This ID is used for sorting execution.
      * @var int
@@ -52,7 +51,7 @@ class responsiblecontact extends field_base {
      * Some can be saved only post save (when they need the option id).
      * @var int
      */
-    public static $save = MOD_BOOKING_EXECUTION_NORMAL;
+    public static $save = MOD_BOOKING_EXECUTION_POSTSAVE;
 
     /**
      * This identifies the header under which this particular field should be displayed.
@@ -91,14 +90,19 @@ class responsiblecontact extends field_base {
         stdClass &$formdata,
         stdClass &$newoption,
         int $updateparam,
-        $returnvalue = null): array {
-
-        parent::prepare_save_field($formdata, $newoption, $updateparam, 0);
+        $returnvalue = null
+    ): array {
 
         $instance = new responsiblecontact();
         $mockclass = new stdClass();
         $mockclass->id = $formdata->id ?? 1;
         $changes = $instance->check_for_changes($formdata, $instance, $mockclass);
+
+        // Here to convert the multiple contacts array and save it as string.
+        if (!empty($formdata->responsiblecontact)) {
+            $formdata->responsiblecontact = implode(',', $formdata->responsiblecontact);
+        }
+        parent::prepare_save_field($formdata, $newoption, $updateparam, 0);
 
         return $changes;
     }
@@ -120,15 +124,18 @@ class responsiblecontact extends field_base {
         $applyheader = true
     ) {
 
-        $mform->addElement('header', 'responsiblecontactheader',
-            '<i class="fa fa-fw fa-user" aria-hidden="true"></i>&nbsp;' . get_string('responsiblecontact', 'mod_booking'));
+        $mform->addElement(
+            'header',
+            'responsiblecontactheader',
+            '<i class="fa fa-fw fa-user" aria-hidden="true"></i>&nbsp;' . get_string('responsiblecontact', 'mod_booking')
+        );
 
         // Responsible contact person - autocomplete.
         $options = [
             'ajax' => 'mod_booking/form_users_selector',
-            'multiple' => false,
+            'multiple' => true,
             'noselectionstring' => get_string('choose...', 'mod_booking'),
-            'valuehtmlcallback' => function($value) {
+            'valuehtmlcallback' => function ($value) {
                 global $OUTPUT;
                 if (empty($value)) {
                     return get_string('choose...', 'mod_booking');
@@ -144,13 +151,19 @@ class responsiblecontact extends field_base {
                     'lastname' => $user->lastname,
                 ];
                 return $OUTPUT->render_from_template(
-                        'mod_booking/form-user-selector-suggestion', $details);
+                    'mod_booking/form-user-selector-suggestion',
+                    $details
+                );
             },
         ];
-        $mform->addElement('autocomplete', 'responsiblecontact',
-            get_string('responsiblecontact', 'mod_booking'), [], $options);
+        $mform->addElement(
+            'autocomplete',
+            'responsiblecontact',
+            get_string('responsiblecontact', 'mod_booking'),
+            [],
+            $options
+        );
         $mform->addHelpButton('responsiblecontact', 'responsiblecontact', 'mod_booking');
-
     }
 
     /**
@@ -167,13 +180,67 @@ class responsiblecontact extends field_base {
                 $data->responsiblecontact = $settings->responsiblecontact ?? [];
             }
         } else {
+            // We are importing.
             if (!empty($data->responsiblecontact)) {
                 // We set throwerror to true...
-                // ... because on importing, we want it to fail, if teacher is not found.
-                $userids = teachers_handler::get_user_ids_from_string($data->responsiblecontact, true);
-                $data->responsiblecontact = $userids[0] ?? [];
+                // ... because on importing, we want it to fail, if responsiblecontact is not found.
+                if (is_string($data->responsiblecontact)) {
+                    $userids = teachers_handler::get_user_ids_from_string($data->responsiblecontact, true);
+                    $data->responsiblecontact = $userids ?? [];
+                } else if (is_array($data->responsiblecontact)) {
+                    // If it's already an array, we assume it's userids.
+                    return;
+                } else {
+                    // If it's not a string or array, we set it to an empty array.
+                    $data->responsiblecontact = [];
+                }
             } else {
                 $data->responsiblecontact = $settings->responsiblecontact ?? [];
+            }
+        }
+    }
+
+    /**
+     * Save data
+     * @param stdClass $formdata
+     * @param stdClass $option
+     * @return void
+     * @throws \dml_exception
+     */
+    public static function save_data(stdClass &$formdata, stdClass &$option) {
+        global $DB;
+        $cmid = $formdata->cmid;
+        $optionid = $option->id;
+        if (!empty($cmid) && !empty($optionid)) {
+            // Check if we need to enrol responsible contact users.
+            if (get_config('booking', 'responsiblecontactenroltocourse')) {
+                $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+                $bookingoption = singleton_service::get_instance_of_booking_option($cmid, $optionid);
+                $oldcontacts = $settings->responsiblecontact;
+                if (empty($formdata->responsiblecontact)) {
+                    $formdata->responsiblecontact = '';
+                }
+                $newcontacts = array_map('trim', explode(',', $formdata->responsiblecontact ?? ''));
+
+                // Now get the role id for the responsible contacts and enroll them if they are newcontacts.
+                foreach ($newcontacts as $newcontact) {
+                    if (!empty($newcontact) && !in_array($newcontact, $oldcontacts)) {
+                        $roleid = (int) get_config('booking', 'definedresponsiblecontactrole');
+                        if (empty($roleid)) {
+                            $roleid = 0;
+                        }
+                        $courseid = $formdata->courseid ?? 0;
+                        if (!empty($courseid)) {
+                            $bookingoption->enrol_user((int) $newcontact, false, $roleid, false, $courseid, true);
+                        }
+                    }
+                }
+                // We need to unenrol the oldcontacts contacts, that are not in the newcontacts array.
+                foreach ($oldcontacts as $oldcontact) {
+                    if (!empty($oldcontact) && !in_array($oldcontact, $newcontacts)) {
+                        $bookingoption->unenrol_user((int)$oldcontact);
+                    }
+                }
             }
         }
     }

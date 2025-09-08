@@ -19,7 +19,7 @@
  *
  * @package mod_booking
  * @copyright 2022 Wunderbyte GmbH <info@wunderbyte.at>
- * @author Bernhard Fischer
+ * @author Bernhard Fischer, Magdalena Holczik
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -27,10 +27,12 @@ namespace mod_booking\booking_rules;
 
 use coding_exception;
 use context;
+use context_system;
 use context_module;
 use dml_exception;
 use mod_booking\output\ruleslist;
 use mod_booking\singleton_service;
+use Throwable;
 
 /**
  * Class to handle display and management of rules.
@@ -40,7 +42,6 @@ use mod_booking\singleton_service;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class booking_rules {
-
     /** @var array $rules */
     public static $rules = [];
 
@@ -54,7 +55,8 @@ class booking_rules {
     public static function get_rendered_list_of_saved_rules($contextid = 1, $enableaddbutton = true) {
         global $PAGE;
 
-        $rules = self::get_list_of_saved_rules($contextid);
+        // Fetch all rules.
+        $rules = self::get_list_of_saved_rules();
         $data = new ruleslist($rules, $contextid, $enableaddbutton);
         $output = $PAGE->get_renderer('booking');
         return $output->render_ruleslist($data);
@@ -71,14 +73,28 @@ class booking_rules {
 
         global $DB;
 
-        if (empty(self::$rules)) {
-            $rules = $DB->get_records('booking_rules', null, 'id');
-            self::$rules = $rules;
-        }
+        $getrulessql =
+           "SELECT br.*
+              FROM {booking_rules} br
+              JOIN {context} c ON c.id = br.contextid
+              JOIN {course_modules} cm ON c.instanceid = cm.id AND c.contextlevel = 70 -- CONTEXT_MODULE
+              JOIN {modules} m ON m.id = cm.module AND m.name = 'booking'
+             WHERE cm.deletioninprogress = 0
+             UNION
+            SELECT br2.*
+              FROM {booking_rules} br2
+              JOIN {context} c2 ON c2.id = br2.contextid AND c2.contextlevel = 10 -- CONTEXT_SYSTEM
+          ORDER BY id ASC";
 
         if (empty($contextid)) {
+            self::$rules = $DB->get_records_sql($getrulessql);
             return self::$rules;
         }
+
+        if (empty(self::$rules)) {
+            self::$rules = $DB->get_records_sql($getrulessql);
+        }
+
         return array_filter(self::$rules, fn($a) => $a->contextid == $contextid);
     }
 
@@ -110,9 +126,12 @@ class booking_rules {
      * @throws dml_exception
      */
     public static function get_list_of_saved_rules_by_context(int $contextid = 1, string $eventname = '') {
-
-        $context = context::instance_by_id($contextid);
-        $path = $context->path;
+        try {
+            $context = context::instance_by_id($contextid);
+            $path = $context->path;
+        } catch (Throwable $e) {
+            return [];
+        }
 
         $patharray = explode('/', $path);
 
@@ -124,8 +143,46 @@ class booking_rules {
         if (empty($eventname)) {
             return array_filter($rules, fn($a) => in_array($a->contextid, $patharray));
         } else {
-            return array_filter($rules,
-                fn($a) => (in_array($a->contextid, $patharray) && ($a->eventname == $eventname)));
+            return array_filter(
+                $rules,
+                fn($a) => (in_array($a->contextid, $patharray) && ($a->eventname == $eventname))
+            );
         }
+    }
+
+    /**
+     * Deletes rules for this context and below.
+     * @param int $contextid
+     */
+    public static function delete_rules_by_context(int $contextid) {
+
+        global $DB;
+
+        // We can't delete all rules for the system context.
+        // This is an emergency brake.
+        if ($contextid == context_system::instance()->id) {
+            return;
+        }
+
+        $rulesofcontext = $DB->get_records('booking_rules', ['contextid' => $contextid]);
+
+        foreach ($rulesofcontext as $rule) {
+            rules_info::delete_rule($rule->id);
+        }
+    }
+
+    /**
+     * Check if rules in a given contextid match with the bookingid.
+     * @param int $bookingcmid
+     * @param int $contextid
+     */
+    public static function booking_matches_rulecontext(int $bookingcmid, int $contextid) {
+
+        if ($contextid == 1) {
+            return true;
+        }
+        // Context of the rule.
+        $context = context::instance_by_id($contextid);
+        return $context->instanceid == $bookingcmid;
     }
 }

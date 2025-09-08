@@ -41,7 +41,6 @@ use templatable;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class coursepage_shortinfo_and_button implements renderable, templatable {
-
     /**
      * @var stdClass Booking instance.
      */
@@ -81,7 +80,7 @@ class coursepage_shortinfo_and_button implements renderable, templatable {
         global $COURSE, $CFG;
 
         $this->cmid = $cm->id;
-        $this->booking = singleton_service::get_instance_of_booking_by_cmid($cm->id);
+        $this->booking = singleton_service::get_instance_of_booking_by_cmid((int)$cm->id);
 
         $this->coursename = $COURSE->fullname;
         $this->eventtype = $this->booking->settings->eventtype;

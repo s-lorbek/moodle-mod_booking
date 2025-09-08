@@ -31,6 +31,7 @@ use external_function_parameters;
 use external_value;
 use external_single_structure;
 use mod_booking\booking_bookit;
+use mod_booking\price;
 use mod_booking\singleton_service;
 use mod_booking\subbookings\subbookings_info;
 
@@ -47,7 +48,6 @@ require_once($CFG->libdir . '/externallib.php');
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class bookit extends external_api {
-
     /**
      * Describes the parameters for bookit.
      *
@@ -59,8 +59,7 @@ class bookit extends external_api {
             'itemid' => new external_value(PARAM_INT, 'itemid'),
             'userid' => new external_value(PARAM_INT, 'userid'),
             'data' => new external_value(PARAM_RAW, 'data'),
-            ]
-        );
+            ]);
     }
 
     /**
@@ -100,7 +99,10 @@ class bookit extends external_api {
             ];
         }
 
-        list ($templates, $data) = booking_bookit::render_bookit_template_data($settings, $userid, false);
+        // To make sure we still render for the right user.
+        price::set_bookforuser($userid);
+
+        [$templates, $data] = booking_bookit::render_bookit_template_data($settings, $userid, false);
 
         return [
             'status' => $status,
@@ -121,7 +123,6 @@ class bookit extends external_api {
             'message' => new external_value(PARAM_RAW, 'Message if any', VALUE_DEFAULT, ''),
             'template' => new external_value(PARAM_TEXT, 'Button template', VALUE_DEFAULT, ''),
             'json' => new external_value(PARAM_RAW, 'Data as json', VALUE_DEFAULT, ''),
-            ]
-        );
+            ]);
     }
 }

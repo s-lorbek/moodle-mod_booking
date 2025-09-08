@@ -26,14 +26,17 @@ namespace mod_booking\output;
 
 use context_module;
 use context_system;
+use core_plugin_manager;
 use html_writer;
+use local_wunderbyte_table\local\customfield\wbt_field_controller_info;
 use mod_booking\booking;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_bookit;
 use mod_booking\booking_context_helper;
 use mod_booking\booking_option;
 use mod_booking\local\modechecker;
 use mod_booking\option\dates_handler;
+use mod_booking\option\fields\competencies;
 use mod_booking\price;
 use mod_booking\singleton_service;
 use moodle_url;
@@ -158,7 +161,7 @@ class bookingoption_description implements renderable, templatable {
     /** @var string $manageresponsesurl */
     private $manageresponsesurl = null;
 
-    /** @var stdClass $responsiblecontactuser */
+    /** @var array $responsiblecontactuser */
     private $responsiblecontactuser = null;
 
     /** @var string $bookingopeningtime */
@@ -175,6 +178,21 @@ class bookingoption_description implements renderable, templatable {
 
     /** @var string $canceluntil */
     private $canceluntil = null;
+
+    /** @var bool $selflearningcourseshowdurationinfo */
+    private $selflearningcourseshowdurationinfo = null;
+
+    /** @var bool $selflearningcourseshowdurationinfoexpired */
+    private $selflearningcourseshowdurationinfoexpired = null;
+
+    /** @var string $competencies */
+    private $competencies = '';
+
+    /** @var string $competencyheader */
+    private $competencyheader = '';
+
+    /** @var array $subpluginstemplatedata */
+    private $subpluginstemplatedata = [];
 
     /**
      * Constructor.
@@ -264,23 +282,40 @@ class bookingoption_description implements renderable, templatable {
         // Check if it's a self-learning course. There's a JSON flag for this.
         if (!empty($settings->selflearningcourse)) {
             $this->selflearningcourse = true;
-            // Format the duration correctly.
-            $this->duration = format_time($settings->duration);
 
-            $ba = singleton_service::get_instance_of_booking_answers($settings);
-            $buyforuser = price::return_user_to_buy_for();
-            if (isset($ba->usersonlist[$buyforuser->id])) {
-                $timebooked = $ba->usersonlist[$buyforuser->id]->timecreated;
-                $timeremainingsec = $timebooked + $settings->duration - time();
-                $this->timeremaining = format_time($timeremainingsec);
+            if (get_config('booking', 'selflearningcoursehideduration')) {
+                $this->selflearningcourseshowdurationinfo = null;
+            } else if (!empty($settings->duration)) {
+                // We do not show duration info if it is set to 0.
+                $this->selflearningcourseshowdurationinfo = true;
+
+                // Format the duration correctly.
+                $this->duration = format_time($settings->duration);
+
+                $ba = singleton_service::get_instance_of_booking_answers($settings);
+                $usersonlist = $ba->get_usersonlist();
+                $buyforuser = price::return_user_to_buy_for();
+                if (isset($usersonlist[$buyforuser->id])) {
+                    $timebooked = $usersonlist[$buyforuser->id]->timecreated;
+                    $timeremainingsec = $timebooked + $settings->duration - time();
+
+                    if ($timeremainingsec <= 0) {
+                        $this->selflearningcourseshowdurationinfo = null;
+                        $this->selflearningcourseshowdurationinfoexpired = true;
+                    } else {
+                        $this->timeremaining = format_time($timeremainingsec);
+                    }
+                }
             }
         }
 
         // Show info until when the booking option can be cancelled.
         // If cancelling was disabled in the booking option or for the whole instance...
         // ...then we do not show the cancel until info.
-        if (booking_option::get_value_of_json_by_key($optionid, 'disablecancel')
-            || booking::get_value_of_json_by_key($settings->bookingid, 'disablecancel')) {
+        if (
+            booking_option::get_value_of_json_by_key($optionid, 'disablecancel')
+            || booking::get_value_of_json_by_key($settings->bookingid, 'disablecancel')
+        ) {
             $this->canceluntil = null;
         } else {
             // Check if the option has its own canceluntil date.
@@ -350,8 +385,12 @@ class bookingoption_description implements renderable, templatable {
         booking_context_helper::fix_booking_page_context($PAGE, $cmid);
 
         // Description from booking option settings formatted as HTML.
-        $this->description = $settings->description;
-
+        if (empty(get_config('booking', 'changedescriptionfield'))) {
+            $this->description = $settings->description;
+        } else {
+            $customfieldshortname = get_config('booking', 'changedescriptionfield');
+            $this->description = $settings->customfields[$customfieldshortname] ?? "";
+        }
         // Do the same for internal annotation.
         $this->annotation = $settings->annotation;
 
@@ -361,71 +400,69 @@ class bookingoption_description implements renderable, templatable {
         // Attachments.
         $this->attachments = booking_option::render_attachments($optionid, 'optionview-bookingoption-attachments mb-3');
 
-        // Every date will be an array of datestring and customfields.
-        // But customfields will only be shown if we show booking option information inline.
-
-        $this->dates = $bookingoption->return_array_of_sessions(
-            $bookingevent,
-            $descriptionparam,
-            $withcustomfields,
-            $forbookeduser,
-            $ashtml
-        );
-
-        if (!empty($this->dates)) {
-            $this->datesexist = true;
+        // Every date will be an array of datestrings, customfields and additional info like entities.
+        // Make sure, that optiondates (sessions) are not stored/shown for self-learning courses.
+        if (empty($settings->selflearningcourse)) {
+            $this->dates = $bookingoption->return_array_of_sessions(
+                $bookingevent,
+                $descriptionparam,
+                $withcustomfields,
+                $forbookeduser,
+                $ashtml
+            );
+            if (!empty($this->dates)) {
+                $this->datesexist = true;
+            }
         }
 
-        $colteacher = new col_teacher($optionid, $settings);
+        $colteacher = new col_teacher($optionid, $settings, true);
         $this->teachers = $colteacher->teachers;
 
-        // User object of the responsible contact.
-        $this->responsiblecontactuser = $settings->responsiblecontactuser ?? null;
-        if (!empty($this->responsiblecontactuser)) {
-            $isteacher = false;
-            // For teachers of this course, link to teacherpage instead of user profile.
-            foreach ($settings->teachers as $teacher) {
-                if ($this->responsiblecontactuser->id == $teacher->userid) {
-                    $isteacher = true;
-                }
-            }
-            if ($isteacher) {
-                $this->responsiblecontactuser->link = new moodle_url(
-                    '/mod/booking/teacher.php',
-                    ['teacherid' => $settings->responsiblecontact]
-                );
-            } else {
-                $this->responsiblecontactuser->link = new moodle_url(
-                    '/user/profile.php',
-                    ['id' => $this->responsiblecontactuser->id]
-                );
-            }
+        // Array User object of the responsible contact.
+        $responsibles = $settings->responsiblecontactuser;
+
+        // If no responsible contact is set, we take the first teacher.
+        if (empty($responsibles) && !empty($settings->teachers)) {
+            $teacher = reset($settings->teachers);
+            $responsible = new stdClass();
+            $responsible->id = $teacher->userid;
+            $responsible->firstname = $teacher->firstname ?? '';
+            $responsible->lastname = $teacher->lastname ?? '';
+            $responsible->email = $teacher->email ?? '';
+
+            $responsible->link = (new moodle_url(
+                '/mod/booking/teacher.php',
+                ['teacherid' => $teacher->userid]
+            ));
+            $responsibles = [$responsible];
         }
+        if (!empty($responsibles)) {
+            foreach ($responsibles as &$responsiblecontact) {
+                if (empty($responsiblecontact)) {
+                    continue;
+                }
+                $responsiblecontact->link = (new moodle_url(
+                    '/user/profile.php',
+                    ['id' => $responsiblecontact->id]
+                ));
+            }
+        } else {
+            $responsibles = [];
+        }
+
+        // List of responsible contact users.
+        $this->responsiblecontactuser = $responsibles;
 
         if (empty($settings->bookingopeningtime)) {
             $this->bookingopeningtime = null;
         } else {
-            switch (current_language()) {
-                case 'de':
-                    $this->bookingopeningtime = date('d.m.Y, H:i', $settings->bookingopeningtime);
-                    break;
-                default:
-                    $this->bookingopeningtime = date('M d, Y, H:i', $settings->bookingopeningtime);
-                    break;
-            }
+            $this->bookingopeningtime = userdate($settings->bookingopeningtime, get_string('strftimedatetime', 'langconfig'));
         }
 
         if (empty($settings->bookingclosingtime)) {
             $this->bookingclosingtime = null;
         } else {
-            switch (current_language()) {
-                case 'de':
-                    $this->bookingclosingtime = date('d.m.Y, H:i', $settings->bookingclosingtime);
-                    break;
-                default:
-                    $this->bookingclosingtime = date('M d, Y, H:i', $settings->bookingclosingtime);
-                    break;
-            }
+            $this->bookingclosingtime = userdate($settings->bookingclosingtime, get_string('strftimedatetime', 'langconfig'));
         }
 
         if (isset($settings->customfields)) {
@@ -499,6 +536,11 @@ class bookingoption_description implements renderable, templatable {
                     // Currently this is only working for the current USER.
                     $this->booknowbutton = get_string('infowaitinglist', 'booking');
                 }
+                // If competencies are active, we return a list here.
+                $this->competencies = competencies::get_list_of_similar_options(
+                    $bookingoption->settings->competencies ?? "",
+                    $bookingoption
+                );
                 break;
 
             case MOD_BOOKING_DESCRIPTION_CALENDAR:
@@ -520,7 +562,7 @@ class bookingoption_description implements renderable, templatable {
                 // The link should be clickable in mails (placeholder {bookingdetails}).
                 $this->booknowbutton = get_string('gotobookingoption', 'booking') . ': ' .
                     '<a href = "' . $moodleurl . '" target = "_blank">' .
-                        $moodleurl->out(false) .
+                        get_string('gotobookingoptionlink', 'booking', $moodleurl->out(false)) .
                     '</a>';
                 break;
 
@@ -535,7 +577,28 @@ class bookingoption_description implements renderable, templatable {
 
                 $this->bookitsection = booking_bookit::render_bookit_button($settings, $this->usertobuyfor->id);
 
+                // If competencies are active, we return a list here.
+                $this->competencies = competencies::get_list_of_similar_options(
+                    $bookingoption->settings->competencies ?? "",
+                    $bookingoption
+                );
+                if (!empty($this->competencies)) {
+                    $this->competencyheader = get_string('showsimilaroptions', 'mod_booking');
+                }
+
                 break;
+        }
+        foreach (core_plugin_manager::instance()->get_plugins_of_type('bookingextension') as $plugin) {
+            $class = "\\bookingextension_{$plugin->name}\\{$plugin->name}";
+            if (!class_exists($class)) {
+                continue; // Skip if the class does not exist.
+            }
+            $sublplugindata = $class::set_template_data_for_optionview($settings);
+            if (!empty($sublplugindata)) {
+                foreach ($sublplugindata as $data) {
+                    $this->subpluginstemplatedata[] = $data;
+                }
+            }
         }
     }
 
@@ -570,6 +633,8 @@ class bookingoption_description implements renderable, templatable {
             'address' => $this->address,
             'institution' => $this->institution,
             'selflearningcourse' => $this->selflearningcourse,
+            'selflearningcourseshowdurationinfo' => $this->selflearningcourseshowdurationinfo,
+            'selflearningcourseshowdurationinfoexpired' => $this->selflearningcourseshowdurationinfoexpired,
             'duration' => $this->duration,
             'dates' => $this->dates,
             'datesexist' => $this->datesexist,
@@ -590,6 +655,9 @@ class bookingoption_description implements renderable, templatable {
             'returnurl' => !empty($this->returnurl) ? $this->returnurl : false,
             'canceluntil' => $this->canceluntil,
             'canstillbecancelled' => $this->canstillbecancelled,
+            'competencies' => $this->competencies,
+            'competencyheader' => $this->competencyheader,
+            'subpluginstemplatedata' => $this->subpluginstemplatedata,
         ];
 
         if (!empty($this->timeremaining)) {
@@ -600,25 +668,19 @@ class bookingoption_description implements renderable, templatable {
             $returnarray['unitstring'] = $this->unitstring;
         }
 
-        $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
-
         // We return all the customfields of the option.
         // But we make sure, the shortname of a customfield does not conflict with an existing key.
         if ($this->customfields) {
             foreach ($this->customfields as $key => $value) {
                 if (!isset($returnarray[$key])) {
+                    // Make sure, print value for arrays will be converted to string.
                     $printvalue = is_array($value) ? implode(',', $value) : $value;
 
-                    $type = $settings->customfieldsfortemplates[$key]['type'];
+                    // Get the correct field controller from Wunderbyte table.
+                    $fieldcontroller = wbt_field_controller_info::get_instance_by_shortname($key);
 
-                    switch ($type) {
-                        case 'textarea':
-                            $returnarray[$key] = format_text($printvalue);
-                            break;
-                        default:
-                            $returnarray[$key] = format_string($printvalue);
-                            break;
-                    }
+                    // Get the option value from field controller.
+                    $returnarray[$key] = $fieldcontroller->get_option_value_by_key($printvalue);
                 }
             }
         }
@@ -630,6 +692,20 @@ class bookingoption_description implements renderable, templatable {
         }
         if (count($this->teachers) > 0) {
             $returnarray['showteacherslabel'] = 1;
+        }
+
+        // In plugin settings, we can choose customfields we want to have rendered together.
+        $returnarray['optionviewcustomfields'] = '';
+        if (!empty($cfstoshowstring = get_config('booking', 'optionviewcustomfields'))) {
+            $cfstoshow = explode(',', $cfstoshowstring);
+            foreach ($cfstoshow as $cftoshow) {
+                if (!empty($returnarray[$cftoshow])) {
+                    $returnarray['optionviewcustomfields'] .=
+                        "<div class='optionview-customfield-$cftoshow'>" .
+                            $returnarray[$cftoshow] .
+                        "</div>";
+                }
+            }
         }
 
         return $returnarray;

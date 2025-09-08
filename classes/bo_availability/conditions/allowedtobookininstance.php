@@ -55,15 +55,39 @@ class allowedtobookininstance implements bo_condition {
     /** @var stdClass $customsettings an stdclass coming from the json which passes custom settings */
     public $customsettings = null;
 
+    /** @var int $optionid Id of the option of the singleton */
+    public $optionid;
+
+    /**
+     * Singleton instance.
+     *
+     * @var object
+     */
+    private static $instances = null;
+
+    /**
+     * Singleton instance.
+     *
+     * @param ?int $id
+     * @return object
+     *
+     */
+    public static function instance(?int $id = null): object {
+        if (!isset(self::$instances[$id])) {
+            self::$instances[$id] = new self($id);
+        }
+        return self::$instances[$id];
+    }
+
     /**
      * Constructor.
      *
      * @param ?int $id
      * @return void
      */
-    public function __construct(?int $id = null) {
+    private function __construct(?int $id = null) {
         if ($id) {
-            $this->id = $id;
+            $this->optionid = $id;
         }
     }
 
@@ -117,7 +141,6 @@ class allowedtobookininstance implements bo_condition {
 
             // If the user is not yet booked we return true.
             if (has_capability('mod/booking:choose', $context)) {
-
                 $isavailable = true;
             }
         }
@@ -134,10 +157,10 @@ class allowedtobookininstance implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -205,7 +228,6 @@ class allowedtobookininstance implements bo_condition {
 
         // Check if PRO version is activated.
         if (wb_payment::pro_version_is_activated()) {
-
             $mform->addElement(
                 'advcheckbox',
                 'bo_cond_allowedtobookininstance_restrict',
@@ -217,6 +239,7 @@ class allowedtobookininstance implements bo_condition {
                 'bo_cond_allowedtobookininstance_capabilitynotneeded',
                 get_string('bocondallowedtobookininstanceanyways', 'mod_booking')
             );
+            $mform->setDefault('bo_cond_allowedtobookininstance_capabilitynotneeded', 1);
             $mform->hideIf(
                 'bo_cond_allowedtobookininstance_capabilitynotneeded',
                 'bo_cond_allowedtobookininstance_restrict',
@@ -275,7 +298,7 @@ class allowedtobookininstance implements bo_condition {
                     if (!empty($jsonconditions)) {
                         foreach ($jsonconditions as $jsoncondition) {
                             $currentclassname = $jsoncondition->class;
-                            $currentcondition = new $currentclassname();
+                            $currentcondition = $currentclassname::instance();
                             // Currently conditions of the same type cannot be combined with each other.
                             if (
                                 $jsoncondition->id != $this->id
@@ -441,7 +464,6 @@ class allowedtobookininstance implements bo_condition {
             $description = $full ?
                     get_string('bocondallowedtobookininstancefullnotavailable', 'mod_booking') :
                     get_string('bocondallowedtobookininstancenotavailable', 'mod_booking');
-
         }
 
         return $description;

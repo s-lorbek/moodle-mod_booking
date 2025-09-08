@@ -25,6 +25,8 @@
 
 namespace mod_booking\output;
 
+use mod_booking\price;
+use mod_booking\singleton_service;
 use renderer_base;
 use renderable;
 use templatable;
@@ -38,7 +40,6 @@ use templatable;
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class button_notifyme implements renderable, templatable {
-
     /**
      * $userid
      *
@@ -61,6 +62,13 @@ class button_notifyme implements renderable, templatable {
     private $onlist = false;
 
     /**
+     * $price
+     *
+     * @var array
+     */
+    private $price = [];
+
+    /**
      * Constructor
      *
      * @param int $userid
@@ -72,6 +80,9 @@ class button_notifyme implements renderable, templatable {
         $this->userid = $userid;
         $this->itemid = $itemid;
         $this->onlist = $onlist;
+
+        $user = singleton_service::get_instance_of_user($userid);
+        $this->price = price::get_price('option', $itemid, $user);
     }
 
     /**
@@ -83,6 +94,7 @@ class button_notifyme implements renderable, templatable {
         $returnarray = [
             'userid' => $this->userid,
             'itemid' => $this->itemid,
+            'price' => $this->price ?? [],
             'area' => 'option',
         ];
 

@@ -97,8 +97,8 @@ class optionhasstarted implements bo_condition {
         // The actual meaning of this field is "allow booking after option has started".
         if ($bookingsettings->allowupdate == 1) {
             $isavailable = true;
-        } else if (!empty($settings->duration)) {
-            // For booking options with a duration (self-learning courses) this condition may never block.
+        } else if (!empty($settings->selflearningcourse)) {
+            // For self-learning courses this condition may never block.
             $isavailable = true;
         } else if (!empty($settings->coursestarttime)) {
             // In this case, we have to check if the booking option has already started.
@@ -121,10 +121,10 @@ class optionhasstarted implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }

@@ -32,6 +32,7 @@ use mod_booking_generator;
 use context_system;
 use mod_booking\bo_availability\bo_info;
 use stdClass;
+use tool_mocktesttime\time_mock;
 
 defined('MOODLE_INTERNAL') || die();
 global $CFG;
@@ -46,20 +47,22 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 final class condition_allowupdatetimestamp_test extends advanced_testcase {
-
     /**
      * Tests set up.
      */
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest(true);
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
     }
 
     /**
      * Test booking, cancelation, option has started etc.
      *
-     * @covers \condition\iscancelled::is_available
-     * @covers \condition\hasstarted::is_available
+     * @covers \mod_booking\bo_availability\conditions\iscancelled::is_available
+     * @covers \mod_booking\bo_availability\conditions\optionhasstarted::is_available
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -170,7 +173,7 @@ final class condition_allowupdatetimestamp_test extends advanced_testcase {
             'notificationtext' => ['text' => 'text'], 'userleave' => ['text' => 'text'],
             'tags' => '',
             'completion' => 2,
-            'showviews' => ['mybooking,myoptions,showall,showactive,myinstitution'],
+            'showviews' => ['mybooking,myoptions,optionsiamresponsiblefor,showall,showactive,myinstitution'],
         ];
         return ['bdata' => [$bdata]];
     }

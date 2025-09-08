@@ -29,8 +29,10 @@
 use context_system;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
+use mod_booking\booking_bookit;
 use mod_booking\booking_option_settings;
+use mod_booking\output\bookingoption_description;
 use mod_booking\singleton_service;
 use MoodleQuickForm;
 
@@ -49,7 +51,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class askforconfirmation implements bo_condition {
-
     /** @var int $id Standard Conditions have hardcoded ids. */
     public $id = MOD_BOOKING_BO_COND_ASKFORCONFIRMATION;
 
@@ -103,17 +104,35 @@ class askforconfirmation implements bo_condition {
 
         // The following conditions have to be met.
         // - User must not be on waitinglist
-        // - AND: Ask for confirmation must be turned on.
+        // - AND: Always ask for confirmation must be turned on.
         // - OR: A price is set and it's fully booked already.
-        if (!isset($bookinginformation['onwaitinglist'])
-            && (!empty($settings->waitforconfirmation)
-            || (!empty($settings->jsonobject->useprice))
-                && (isset($bookinginformation['notbooked']['fullybooked']) &&
-                $bookinginformation['notbooked']['fullybooked'] === true
-                && ($settings->maxoverbooking > booking_answers::count_places($bookinganswer->usersonwaitinglist))))) {
-
-            if (!empty(get_config('booking', 'allowoverbooking'))
-                && has_capability('mod/booking:canoverbook', context_system::instance())) {
+        // This should not block for waitforconfirmation == 2 which means confirmation only for users already on waitinglist.
+        // Except if there are people on the waitinglist and there is a free spot...
+        // ... then with waitforconfirmation = 2, booking should be possible only on the waitinglist.
+        if (
+            !isset($bookinginformation['onwaitinglist'])
+            && (
+                    (
+                        $settings->waitforconfirmation == 1
+                        || (
+                            !empty($settings->jsonobject->useprice)
+                            && isset($bookinginformation['notbooked']['fullybooked'])
+                            && $bookinginformation['notbooked']['fullybooked'] === true
+                            && ($settings->maxoverbooking > $bookinginformation['notbooked']['waiting'])
+                        )
+                    )
+                ||
+                    ($settings->waitforconfirmation == 2
+                    && isset($bookinginformation['notbooked']['fullybooked'])
+                    && $bookinginformation['notbooked']['fullybooked'] === false
+                    && (!isset($bookinginformation['notbooked']['waiting'])
+                        || $bookinginformation['notbooked']['waiting'] > 0))
+            )
+        ) {
+            if (
+                !empty(get_config('booking', 'allowoverbooking'))
+                && has_capability('mod/booking:canoverbook', context_system::instance())
+            ) {
                 $isavailable = true;
             } else {
                 $isavailable = false;
@@ -131,10 +150,10 @@ class askforconfirmation implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -222,7 +241,7 @@ class askforconfirmation implements bo_condition {
 
         $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
 
-        list($template, $data2) = booking_bookit::render_bookit_template_data($settings, $userid ?? 0, false);
+        [$template, $data2] = booking_bookit::render_bookit_template_data($settings, $userid ?? 0, false);
         $data2 = reset($data2);
         $template = reset($template);
 
@@ -284,8 +303,18 @@ class askforconfirmation implements bo_condition {
         }
         $label = $this->get_description_string(false, $full, $settings);
 
-        return bo_info::render_button($settings, $userid, $label, 'btn btn-secondary mt-1 mb-1', false, $fullwidth,
-            'button', 'option', false, 'noforward');
+        return bo_info::render_button(
+            $settings,
+            $userid,
+            $label,
+            'btn btn-secondary mt-1 mb-1',
+            true,
+            $fullwidth,
+            'button',
+            'option',
+            false,
+            'noforward'
+        );
     }
 
     /**

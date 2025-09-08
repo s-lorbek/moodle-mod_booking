@@ -46,7 +46,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class isloggedinprice implements bo_condition {
-
     /** @var int $id Standard Conditions have hardcoded ids. */
     public $id = MOD_BOOKING_BO_COND_ISLOGGEDINPRICE;
 
@@ -115,10 +114,10 @@ class isloggedinprice implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -219,52 +218,51 @@ class isloggedinprice implements bo_condition {
             $userid = $USER->id;
         }
 
-        $priceitems = price::get_prices_from_cache_or_db('option', $settings->id, $userid);
-        $sortedpriceitems = [];
-        foreach ($priceitems as $priceitem) {
-            $pricecategory = price::get_active_pricecategory_from_cache_or_db($priceitem->pricecategoryidentifier);
-
-            $priceitemarray = (array)$priceitem;
-
-            if (!empty($pricecategory)) {
-                $priceitemarray['pricecategoryname'] = $pricecategory->name;
-                // Actually not yet sorted.
-                $sortedpriceitems[$pricecategory->pricecatsortorder] = $priceitemarray;
-            }
+        // Fetch config.
+        $displayloginbutton = self::add_loginbutton();
+        $link = "";
+        $style = "";
+        $label = get_string('bocondisloggedinnotavailable', 'mod_booking');
+        // Render button according to settings.
+        if (!empty($displayloginbutton['showbutton'])) {
+            $link = "/login/index.php";
+            $style = "bookinglinkbutton btn btn-" . $displayloginbutton['buttonstyle'];
         }
 
-        // Now we sort the array according to the sort order defined in price categories.
-        ksort($sortedpriceitems);
-        // The mustache template cannot handle keys, so we remove them now.
-        $sortedpriceitems = array_values($sortedpriceitems);
-
-        // And add them to the returned array.
-        $returnarray['priceitems'] = $sortedpriceitems;
-
-        if ($fullwidth) {
-            $returnarray['fullwidth'] = $fullwidth;
-        }
-
-        self::add_loginbutton($returnarray);
-
-        return ['mod_booking/col_price', $returnarray];
+        return bo_info::render_button(
+            $settings,
+            $userid,
+            $label,
+            $link !== '' ? $style : 'hidden',
+            true,
+            $fullwidth,
+            'alert',
+            'option',
+            true,
+            '',
+            $link,
+            'fa-play'
+        );
     }
 
     /**
      * Append data of loginbutton to dataarray for template
      *
-     * @param array $data
      *
-     * @return void
+     * @return array
      *
      */
-    public static function add_loginbutton(array &$data) {
+    public static function add_loginbutton(): array {
+        $data = [
+            'showbutton' => 0,
+        ];
         $showbutton = get_config('booking', 'displayloginbuttonforbookingoptions');
         if (!empty($showbutton)) {
             $style = get_config('booking', 'loginbuttonforbookingoptionscoloroptions');
             $data['showbutton'] = 1;
             $data['buttonstyle'] = $style;
         }
+        return $data;
     }
 
     /**

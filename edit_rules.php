@@ -29,10 +29,8 @@ require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot . '/mod/booking/locallib.php');
 require_once($CFG->libdir . '/adminlib.php');
 
-
 $cmid = optional_param('cmid', 0, PARAM_INT);
 $contextid = optional_param('contextid', 0, PARAM_INT);
-
 
 global $DB;
 
@@ -43,22 +41,17 @@ $urlparams = [];
 
 if (empty($cmid) && empty($contextid)) {
     $contextid = context_system::instance()->id;
-} else {
-    if (!empty($cmid)) {
-        [$course, $cm] = get_course_and_cm_from_cmid($cmid, 'booking');
-        require_course_login($course, false, $cm);
-        $context = context_module::instance($cmid);
-        $contextid = $context->id;
-        $urlparams = ['cmid' => $cmid];
-    } else {
-        $contextid = $contextid;
-    }
+} else if (!empty($cmid)) {
+    [$course, $cm] = get_course_and_cm_from_cmid($cmid, 'booking');
+    require_course_login($course, false, $cm);
+    $context = context_module::instance($cmid);
+    $contextid = $context->id;
+    $urlparams = ['cmid' => $cmid];
 }
 
 if (empty($urlparams)) {
     $urlparams = ['contextid' => 1];
 }
-
 
 $context = context::instance_by_id($contextid);
 

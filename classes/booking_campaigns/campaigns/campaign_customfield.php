@@ -20,6 +20,7 @@ use mod_booking\booking_campaigns\booking_campaign;
 use mod_booking\booking_campaigns\campaigns_info;
 use mod_booking\booking_option_settings;
 use mod_booking\customfield\booking_handler;
+use mod_booking\option\time_handler;
 use mod_booking\singleton_service;
 use mod_booking\task\purge_campaign_caches;
 use MoodleQuickForm;
@@ -37,7 +38,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class campaign_customfield implements booking_campaign {
-
     /** @var int $id */
     public $id = 0;
 
@@ -84,8 +84,8 @@ class campaign_customfield implements booking_campaign {
     /** @var string $cpoperator */
     public $cpoperator = '';
 
-    /** @var string $cpvalue */
-    public $cpvalue = '';
+    /** @var array $cpvalue */
+    public $cpvalue = [];
 
     /** @var bool $userspecificprice */
     public $userspecificprice = false;
@@ -105,17 +105,26 @@ class campaign_customfield implements booking_campaign {
 
         // Set additional data stored in JSON.
         $jsonobj = json_decode($record->json);
-        $this->bofieldname = $jsonobj->bofieldname;
-        $this->campaignfieldnameoperator = $jsonobj->campaignfieldnameoperator;
-        $this->fieldvalue = $jsonobj->fieldvalue;
+        $this->bofieldname = $jsonobj->bofieldname ?? '';
+        $this->campaignfieldnameoperator = $jsonobj->campaignfieldnameoperator ?? '';
+        $this->fieldvalue = $jsonobj->fieldvalue ?? '';
 
         if (!empty($jsonobj->cpfield)) {
-
+            // Cpfield should be type string.
+            if (is_array($jsonobj->cpfield)) {
+                $this->cpfield = $jsonobj->cpfield[0];
+            } else {
+                $this->cpfield = $jsonobj->cpfield;
+            }
             $this->userspecificprice = true;
 
-            $this->cpfield = $jsonobj->cpfield ?? 0;
             $this->cpoperator = $jsonobj->cpoperator ?? '';
-            $this->cpvalue = $jsonobj->cpvalue ?? '';
+            // Cpvalue should be type array.
+            if (!is_array($jsonobj->cpvalue)) {
+                $this->cpvalue = [$jsonobj->cpvalue];
+            } else {
+                $this->cpvalue = $jsonobj->cpvalue ?? [];
+            }
         }
     }
 
@@ -131,14 +140,25 @@ class campaign_customfield implements booking_campaign {
 
         campaigns_info::add_customfields_to_form($mform, $ajaxformdata);
 
-        $mform->addElement('date_time_selector', 'starttime', get_string('campaignstart', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'starttime',
+            get_string('campaignstart', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('starttime', PARAM_INT);
         $mform->addHelpButton('starttime', 'campaignstart', 'mod_booking');
+        $mform->setDefault('starttime', time_handler::prettytime(time()));
 
-        $mform->addElement('date_time_selector', 'endtime', get_string('campaignend', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'endtime',
+            get_string('campaignend', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('endtime', PARAM_INT);
         $mform->addHelpButton('endtime', 'campaignend', 'mod_booking');
-
+        $mform->setDefault('endtime', time_handler::prettytime(time()));
         // Price factor (multiplier).
         $mform->addElement('float', 'pricefactor', get_string('pricefactor', 'mod_booking'), null);
         $mform->setDefault('pricefactor', 1);
@@ -185,7 +205,7 @@ class campaign_customfield implements booking_campaign {
         if (!empty($data->cpfield)) {
             $jsonobject->cpfield = $data->cpfield;
             $jsonobject->cpoperator = $data->cpoperator ?? '';
-            $jsonobject->cpvalue = $data->cpvalue ?? '';
+            $jsonobject->cpvalue = $data->cpvalue ?? [];
         }
 
         $record->json = json_encode($jsonobject);
@@ -239,7 +259,7 @@ class campaign_customfield implements booking_campaign {
 
                     $data->cpfield = $jsonobject->cpfield ?? 0;
                     $data->cpoperator = $jsonobject->cpoperator ?? '';
-                    $data->cpvalue = $jsonobject->cpvalue ?? '';
+                    $data->cpvalue = $jsonobject->cpvalue ?? [];
                     break;
             }
         }
@@ -253,34 +273,14 @@ class campaign_customfield implements booking_campaign {
      * @return bool true if the campaign is currently active
      */
     public function campaign_is_active(int $optionid, booking_option_settings $settings): bool {
-        $isactive = false;
-        $now = time();
-        if ($this->starttime <= $now && $now <= $this->endtime) {
-
-            // If it's user specific and there is no option specific bofieldname, we return true right away.
-            // Price it'self for the user is calculated in get_campaign price.
-            if ($this->userspecificprice && empty($this->bofieldname)) {
-                $isactive = true;
-            } else if (!empty($settings->customfields[$this->bofieldname])) {
-                if (
-                    is_string($settings->customfields[$this->bofieldname])
-                    && $settings->customfields[$this->bofieldname] === $this->fieldvalue) {
-                    // It's a string so we can compare directly.
-                    $isactive = true;
-                } else if (is_array($settings->customfields[$this->bofieldname])
-                    && in_array($this->fieldvalue, $settings->customfields[$this->bofieldname])) {
-                    // It's an array, so we check with in_array.
-                    $isactive = true;
-                }
-                            // If operator is set to "does not contain" we need to invert the result.
-                if (
-                    $this->campaignfieldnameoperator === '!~'
-                ) {
-                    $isactive = !$isactive;
-                }
-            }
-        }
-        return $isactive;
+        $this->fieldvalue = is_array($this->fieldvalue) ? reset($this->fieldvalue) : $this->fieldvalue;
+        return campaigns_info::check_if_campaign_is_active(
+            $this->starttime,
+            $this->endtime,
+            $settings->customfields[$this->bofieldname] ?? '',
+            empty($this->bofieldname) ? "" : $this->fieldvalue,
+            $this->campaignfieldnameoperator
+        );
     }
 
     /**
@@ -295,25 +295,14 @@ class campaign_customfield implements booking_campaign {
             $campaignprice = $price * $this->pricefactor;
         } else {
             $campaignprice = $price;
-            $user = singleton_service::get_instance_of_user($userid, true);
-            if ($fieldvalue = $user->profile[$this->cpfield]) {
-                switch ($this->cpoperator) {
-                    case '=':
-                        if ($fieldvalue == $this->cpvalue) {
-                            $campaignprice = $price * $this->pricefactor;
-                        }
-                        break;
-                    case '~':
-                        if ($fieldvalue == $this->cpvalue) {
-                            $campaignprice = $price * $this->pricefactor;
-                        }
-                        break;
-                    case '!~':
-                        if ($fieldvalue !== $this->cpvalue) {
-                            $campaignprice = $price * $this->pricefactor;
-                        }
-                        break;
-                }
+            $fieldapplies = campaigns_info::check_if_profilefield_applies(
+                $this->cpvalue,
+                $this->cpfield,
+                $this->cpoperator,
+                $userid
+            );
+            if ($fieldapplies) {
+                $campaignprice = $price * $this->pricefactor;
             }
         }
 
@@ -345,7 +334,7 @@ class campaign_customfield implements booking_campaign {
 
         // Filter for the booking answers created before campaign started.
         $nrofbookedusers = 0;
-        foreach ($ba->usersonlist as $answer) {
+        foreach ($ba->get_usersonlist() as $answer) {
             if ($answer->timecreated < $this->starttime) {
                 $nrofbookedusers++;
             }
@@ -386,5 +375,33 @@ class campaign_customfield implements booking_campaign {
             'status' => false,
             'message' => '',
         ];
+    }
+
+    /**
+     * Return name of campaign.
+     *
+     * @return string
+     *
+     */
+    public function get_name_of_campaign(): string {
+        return $this->name ?? '';
+    }
+
+    /**
+     * Return id of campaign.
+     *
+     * @return int
+     *
+     */
+    public function get_id_of_campaign(): int {
+        return $this->id ?? 0;
+    }
+
+    /**
+     * Return boolean if price is user-specific.
+     * @return bool
+     */
+    public function user_specific_price(): bool {
+        return $this->userspecificprice;
     }
 }

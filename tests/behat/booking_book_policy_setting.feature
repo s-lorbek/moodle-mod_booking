@@ -20,6 +20,7 @@ Feature: Test of book policy setting in a booking instance
       | admin1   | C1     | manager        |
       | student1 | C1     | student        |
       | student2 | C1     | student        |
+    And I clean booking cache
     And the following "activities" exist:
       | activity | course | name       | intro                  | bookingmanager | eventtype | Default view for booking options | Send confirmation e-mail | bookingpolicy |
       | booking  | C1     | My booking | My booking description | teacher1       | Webinar   | All bookings                     | Yes                      | Are you sure? |
@@ -39,7 +40,7 @@ Feature: Test of book policy setting in a booking instance
 
   @javascript
   Scenario: Booking policy: book option with policy as student
-    Given I am on the "My booking" Activity page logged in as teacher1
+    Given I am on the "My booking" Activity page logged in as student1
     And I should see "Book now" in the ".allbookingoptionstable_r1 .booknow" "css_element"
     And I click on "Book now" "text" in the ".allbookingoptionstable_r1 .booknow" "css_element"
     Then I should see "Are you sure?" in the ".condition-bookingpolicy-form" "css_element"

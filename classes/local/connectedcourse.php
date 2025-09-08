@@ -48,7 +48,7 @@ class connectedcourse {
      */
     public static function create_course_from_template_course(stdClass &$newoption, stdClass &$formdata) {
 
-        global $DB;
+        global $DB, $USER;
 
         $settings = singleton_service::get_instance_of_booking_option_settings($formdata->id);
 
@@ -79,12 +79,24 @@ class connectedcourse {
 
         $categoryid = self::retrieve_categoryid($newoption, $formdata);
 
+        $options = [];
+
+        if (empty($formdata->createnewmoodlecoursefromtemplatewithusers)) {
+            $options[] = ['name' => 'users', 'value' => false];
+            $options[] = ['name' => 'role_assignments', 'value' => false];
+        }
+
+        // We need to switch the user.
+        $previoususer = $USER;
+        $USER = get_admin();
+
         $courseinfo = core_course_external::duplicate_course(
             $origincourseid,
             $fullnamewithprefix,
             $shortname,
             $categoryid,
-            1
+            1,
+            $options
         );
         if (!empty($courseinfo["id"])) {
             $newoption->courseid = $courseinfo["id"];
@@ -95,6 +107,9 @@ class connectedcourse {
 
             \core_tag_tag::delete_instances_by_id(array_keys($tags));
         }
+
+        $USER = $previoususer;
+        fix_course_sortorder();
     }
 
     /**
@@ -229,7 +244,7 @@ class connectedcourse {
      * @return array
      */
     public static function return_tagged_template_courses(string $query = '') {
-        global $DB;
+        global $DB, $USER;
         $where = "c.id IN (SELECT t.itemid FROM {tag_instance} t";
         $configs = get_config('booking', 'templatetags');
 
@@ -270,7 +285,10 @@ class connectedcourse {
             $where .= ")";
             // Add query, if there is any.
             if (!empty($query)) {
-                $where .= " AND (c.fullname LIKE :query1 OR c.shortname LIKE :query2)";
+                $query1sql = $DB->sql_like('c.fullname', ':query1', false);
+                $query2sql = $DB->sql_like('c.shortname', ':query2', false);
+
+                $where .= " AND ($query1sql OR $query2sql )";
                 $params['query1'] = '%' . $query . '%';
                 $params['query2'] = '%' . $query . '%';
             }
@@ -282,9 +300,7 @@ class connectedcourse {
             $context = context_course::instance($course->id);
             if (
                 !has_capability('moodle/course:view', $context)
-                || !has_capability('moodle/backup:backupcourse', $context)
-                || !has_capability('moodle/restore:restorecourse', $context)
-                || !has_capability('moodle/question:add', $context)
+                && !is_enrolled($context, $USER->id)
             ) {
                 unset($courses[$key]);
             }

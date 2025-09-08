@@ -42,7 +42,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class send_notification_mails extends \core\task\scheduled_task {
-
     /**
      * Get name.
      *
@@ -63,6 +62,11 @@ class send_notification_mails extends \core\task\scheduled_task {
     public function execute() {
 
         global $CFG, $DB;
+
+        if (empty(get_config('booking', 'uselegacymailtemplates'))) {
+            mtrace("Legacy mails are turned off, this task should be deactivated.");
+            return;
+        }
 
         $results = $DB->get_records('booking_answers', ['waitinglist' => MOD_BOOKING_STATUSPARAM_NOTIFYMELIST]);
 

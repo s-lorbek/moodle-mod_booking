@@ -169,7 +169,7 @@ class subbooking_additionalitem implements booking_subbooking {
 
         // Add price.
         $price = new price('subbooking', $sboid);
-        $price->add_price_to_mform($mform, true); // Second param true means no price formula here!
+        $price->add_price_to_mform($mform, true, false); // Second param true means no price formula here!
     }
 
     /**
@@ -399,12 +399,14 @@ class subbooking_additionalitem implements booking_subbooking {
         // We never show the subbooking when we are only in waitforconfirmation.
         if (!empty($settings->waitforconfirmation)) {
             $ba = singleton_service::get_instance_of_booking_answers($settings);
+            $usersreserved = $ba->get_usersreserved();
+            $usersonwaitinglist = $ba->get_usersonwaitinglist();
 
             // When the user is neither on waitinglist, nor on reserved, don't show subbookings.
             if (
                 !(
-                    ($ba->usersonwaitinglist[$userid] ?? false)
-                    || ($ba->usersreserved[$userid] ?? false)
+                    ($usersonwaitinglist[$userid] ?? false)
+                    || ($usersreserved[$userid] ?? false)
                 )
             ) {
                 return false;

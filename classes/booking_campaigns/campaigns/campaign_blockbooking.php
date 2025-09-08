@@ -17,12 +17,13 @@
 namespace mod_booking\booking_campaigns\campaigns;
 
 use context_system;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_campaigns\booking_campaign;
 use mod_booking\booking_campaigns\campaigns_info;
 use mod_booking\booking_context_helper;
 use mod_booking\booking_option_settings;
 use mod_booking\customfield\booking_handler;
+use mod_booking\option\time_handler;
 use mod_booking\singleton_service;
 use mod_booking\task\purge_campaign_caches;
 use MoodleQuickForm;
@@ -40,7 +41,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class campaign_blockbooking implements booking_campaign {
-
     /** @var int $id */
     public $id = 0;
 
@@ -81,8 +81,8 @@ class campaign_blockbooking implements booking_campaign {
     /** @var string $cpfield */
     public $cpfield = '';
 
-    /** @var string $cpvalue */
-    public $cpvalue = '';
+    /** @var array $cpvalue */
+    public $cpvalue = [];
 
     /** @var string $cpoperator */
     public $cpoperator = '';
@@ -111,9 +111,24 @@ class campaign_blockbooking implements booking_campaign {
         $this->bofieldname = $jsonobj->bofieldname ?? "";
         $this->campaignfieldnameoperator = $jsonobj->campaignfieldnameoperator ?? "";
         $this->fieldvalue = $jsonobj->fieldvalue ?? "";
-        $this->cpfield = $jsonobj->cpfield ?? "";
-        $this->cpoperator = $jsonobj->cpoperator ?? "";
-        $this->cpvalue = $jsonobj->cpvalue ?? "";
+
+        if (!empty($jsonobj->cpfield)) {
+            // Cpfield should be type string.
+            if (is_array($jsonobj->cpfield)) {
+                $this->cpfield = $jsonobj->cpfield[0];
+            } else {
+                $this->cpfield = $jsonobj->cpfield;
+            }
+            $this->userspecificprice = true;
+
+            $this->cpoperator = $jsonobj->cpoperator ?? '';
+            // Cpvalue should be type array.
+            if (!is_array($jsonobj->cpvalue)) {
+                $this->cpvalue = [$jsonobj->cpvalue];
+            } else {
+                $this->cpvalue = $jsonobj->cpvalue ?? [];
+            }
+        }
         $this->blockoperator = $jsonobj->blockoperator;
         $this->blockinglabel = $jsonobj->blockinglabel;
         $this->hascapability = $jsonobj->hascapability;
@@ -132,12 +147,24 @@ class campaign_blockbooking implements booking_campaign {
 
         campaigns_info::add_customfields_to_form($mform, $ajaxformdata);
 
-        $mform->addElement('date_time_selector', 'starttime', get_string('campaignstart', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'starttime',
+            get_string('campaignstart', 'mod_booking'),
+            time_handler::set_timeintervall()
+        );
         $mform->setType('starttime', PARAM_INT);
+        $mform->setDefault("starttime", time_handler::prettytime(time()));
         $mform->addHelpButton('starttime', 'campaignstart', 'mod_booking');
 
-        $mform->addElement('date_time_selector', 'endtime', get_string('campaignend', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'endtime',
+            get_string('campaignend', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('endtime', PARAM_INT);
+        $mform->setDefault("endtime", time_handler::prettytime(time()));
         $mform->addHelpButton('endtime', 'campaignend', 'mod_booking');
 
         // Price factor (multiplier).
@@ -160,10 +187,10 @@ class campaign_blockbooking implements booking_campaign {
             'textarea',
             'blockinglabel',
             get_string('blockinglabel', 'mod_booking'),
-            'rows="2" cols="50"');
+            'rows="2" cols="50"'
+        );
         $mform->setType('blockinglabel', PARAM_TEXT);
         $mform->addHelpButton('blockinglabel', 'blockinglabel', 'mod_booking');
-
     }
 
     /**
@@ -194,9 +221,9 @@ class campaign_blockbooking implements booking_campaign {
         $jsonobject->bofieldname = $data->bofieldname;
         $jsonobject->campaignfieldnameoperator = $data->campaignfieldnameoperator;
         $jsonobject->fieldvalue = $data->fieldvalue;
-        $jsonobject->cpfield = $data->cpfield;
-        $jsonobject->cpoperator = $data->cpoperator;
-        $jsonobject->cpvalue = $data->cpvalue;
+        $jsonobject->cpfield = $data->cpfield ?? '';
+        $jsonobject->cpoperator = $data->cpoperator ?? '';
+        $jsonobject->cpvalue = $data->cpvalue ?? '';
         $jsonobject->blockoperator = $data->blockoperator;
         $jsonobject->blockinglabel = $data->blockinglabel;
         $jsonobject->hascapability = $data->hascapability ?? '';
@@ -263,29 +290,14 @@ class campaign_blockbooking implements booking_campaign {
      * @return bool true if the campaign is currently active
      */
     public function campaign_is_active(int $optionid, booking_option_settings $settings): bool {
-        $isactive = false;
-        $now = time();
-        if ($this->starttime <= $now && $now <= $this->endtime) {
-
-            if (!empty($settings->customfields[$this->bofieldname])) {
-                if (is_string($settings->customfields[$this->bofieldname])
-                    && $settings->customfields[$this->bofieldname] === $this->fieldvalue) {
-                    // It's a string so we can compare directly.
-                    $isactive = true;
-                } else if (is_array($settings->customfields[$this->bofieldname])
-                    && in_array($this->fieldvalue, $settings->customfields[$this->bofieldname])) {
-                    // It's an array, so we check with in_array.
-                    $isactive = true;
-                }
-            }
-            // If operator is set to "does not contain" we need to invert the result.
-            if (
-                $this->campaignfieldnameoperator === '!~'
-            ) {
-                $isactive = !$isactive;
-            }
-        }
-        return $isactive;
+        $this->fieldvalue = is_array($this->fieldvalue) ? reset($this->fieldvalue) : $this->fieldvalue;
+        return campaigns_info::check_if_campaign_is_active(
+            $this->starttime,
+            $this->endtime,
+            $settings->customfields[$this->bofieldname] ?? '',
+            empty($this->bofieldname) ? "" : $this->fieldvalue,
+            $this->campaignfieldnameoperator
+        );
     }
 
     /**
@@ -331,18 +343,18 @@ class campaign_blockbooking implements booking_campaign {
         booking_context_helper::fix_booking_page_context($PAGE, $settings->cmid);
 
         $ba = singleton_service::get_instance_of_booking_answers($settings);
+        $usersonlist = $ba->get_usersonlist();
 
         $blocking = false;
 
         switch ($this->blockoperator) {
-
             case 'blockbelow':
                 $blocking = ($settings->maxanswers * $this->percentageavailableplaces * 0.01)
-                    > booking_answers::count_places($ba->usersonlist);
+                    > booking_answers::count_places($usersonlist);
                 break;
             case 'blockabove':
                 $blocking = ($settings->maxanswers * $this->percentageavailableplaces * 0.01)
-                    < booking_answers::count_places($ba->usersonlist);
+                    < booking_answers::count_places($usersonlist);
                 break;
             case 'blockalways':
                 $blocking = true;
@@ -355,26 +367,13 @@ class campaign_blockbooking implements booking_campaign {
             ];
         }
 
-        $user = singleton_service::get_instance_of_user($userid, true);
-        if (isset($this->cpfield) && !empty($bofieldname = $this->cpfield)) {
+        if (
+            !empty($userid)
+            && isset($this->cpfield)
+            && !empty($bofieldname = $this->cpfield)
+        ) {
             // If there is a value, it has to match in order to block.
-            $blocking = false;
-            $operator = $this->cpoperator;
-
-            // TODO Handle other types of fields like arrays.
-            if (is_string($user->profile[$bofieldname])) {
-                switch ($operator) {
-                    case "=": // Equals.
-                        $blocking = $user->profile[$bofieldname] === $this->cpvalue;
-                        break;
-                    case "~": // Contains.
-                        $blocking = strpos($user->profile[$bofieldname], $this->cpvalue) !== false;
-                        break;
-                    case "!~":
-                        // Does not contain.
-                        $blocking = strpos($user->profile[$bofieldname], $this->cpvalue) === false;
-                }
-            }
+            $blocking = campaigns_info::check_if_profilefield_applies($this->cpvalue, $this->cpfield, $this->cpoperator, $userid);
         }
         if ($blocking) {
             return [
@@ -386,5 +385,33 @@ class campaign_blockbooking implements booking_campaign {
             'status' => false,
             'label' => '',
         ];
+    }
+
+    /**
+     * Return name of campaign.
+     *
+     * @return string
+     *
+     */
+    public function get_name_of_campaign(): string {
+        return $this->name ?? '';
+    }
+
+    /**
+     * Return id of campaign.
+     *
+     * @return int
+     *
+     */
+    public function get_id_of_campaign(): int {
+        return $this->id ?? 0;
+    }
+
+    /**
+     * Return boolean if price is user-specific.
+     * @return bool
+     */
+    public function user_specific_price(): bool {
+        return $this->userspecificprice;
     }
 }
