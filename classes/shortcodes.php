@@ -109,6 +109,7 @@ class shortcodes {
             "minanswers",
             "bookingopeningtime",
             "bookingclosingtime",
+            "coursestarttime",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -231,6 +232,7 @@ class shortcodes {
             "bookingopeningtime",
             "bookingclosingtime",
             "competencies",
+            "coursestarttime",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -459,6 +461,7 @@ class shortcodes {
             "minanswers",
             "bookingopeningtime",
             "bookingclosingtime",
+            "coursestarttime",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -668,6 +671,7 @@ class shortcodes {
             "minanswers",
             "bookingopeningtime",
             "bookingclosingtime",
+            "coursestarttime",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -685,6 +689,8 @@ class shortcodes {
         $showsort = !empty($args['sort']) ? true : false;
         $showsearch = !empty($args['search']) ? true : false;
 
+        $inactivefilter = empty($args['filteronloadactive']) ? true : false;
+
         view::apply_standard_params_for_bookingtable(
             $table,
             $optionsfields,
@@ -692,7 +698,7 @@ class shortcodes {
             $showsearch,
             $showsort,
             false,
-            true,
+            $inactivefilter,
             $viewparam
         );
 
@@ -776,6 +782,10 @@ class shortcodes {
         // Additional where condition for both card and list views.
         $additionalwhere = self::set_customfield_wherearray($args, $wherearray) ?? '';
 
+        if (!empty($args['completed'])) {
+            $wherearray['completed'] = 1;
+        }
+
         [$fields, $from, $where, $params, $filter] =
                 booking::get_options_filter_sql(
                     0,
@@ -806,6 +816,7 @@ class shortcodes {
             "minanswers",
             "bookingopeningtime",
             "bookingclosingtime",
+            "coursestarttime",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 

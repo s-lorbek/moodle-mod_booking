@@ -838,7 +838,6 @@ $string['confirmactivtyfrom'] = 'Confirm users activity from';
 $string['confirmationmessagesettings'] = 'Confirmation e-mail settings';
 $string['confirmationonnotification'] = 'Open booking for notified user?';
 $string['confirmationonnotificationnoopen'] = "Notifications have no effects with confirmations";
-$string['confirmationonnotificationoneatatime'] = 'Only the <b>one </b> person who was last notified should be able to book';
 $string['confirmationonnotificationwarning'] = '<div class="alert alert-warning" role="alert">Please note that you must configure a corresponding rule for this function to work.</div>';
 $string['confirmationonnotificationyesforall'] = 'Yes, for all notified users';
 $string['confirmationonnotificationyesoneatatime'] = 'Yes, confirmation only for one user at a time';
@@ -2025,6 +2024,9 @@ $string['profeatures:appearance'] = '<ul>
 <li><b>turn off modals</b></li>
 <li><b>options for attendance status</b></li>
 </ul>';
+$string['profeatures:approval'] = '<ul>
+<li><b>Use approval workflows</b></li>
+</ul>';
 $string['profeatures:automaticcoursecreation'] = '<ul>
 <li><b>booking option custom field to be used as course category</b></li>
 <li><b>mark course with tags to use as templates</b></li>
@@ -2178,6 +2180,7 @@ to edit their booking options and to see and edit the list of booked users.<br>
 <b>mod/booking:addeditownoption</b>.';
 $string['responsiblecontactenroltocourse'] = 'Enrol responsible contact person to connected Moodle course';
 $string['responsiblecontactenroltocourse_desc'] = 'Please also define the role the responsible contact person should have in the connected Moodle course.';
+$string['responsiblecontactshowfirstteacher'] = 'On details page, if no responsible contact is set, show the first teacher as responsible contact.';
 $string['restresponse'] = "rest_response";
 $string['restrictanswerperiodclosing'] = 'Booking is possible only until a certain date';
 $string['restrictanswerperiodopening'] = 'Booking is possible only after a certain date';

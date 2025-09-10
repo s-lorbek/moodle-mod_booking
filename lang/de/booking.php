@@ -822,7 +822,6 @@ $string['configurefields'] = 'Spalten und Felder anpassen';
 $string['confirmationmessagesettings'] = 'Buchungsbestätigungseinstellungen';
 $string['confirmationonnotification'] = 'Buchungen für benachrichtigte Personen erlauben';
 $string['confirmationonnotificationnoopen'] = 'Benachrichtigungen haben keinen Einfluss auf Freigabebestätigung';
-$string['confirmationonnotificationoneatatime'] = 'Nur die <b>eine</b>, zuletzt benachrichtigte Person soll buchen können';
 $string['confirmationonnotificationwarning'] = '<div class="alert alert-warning" role="alert">Achtung, damit diese Funktion funktioniert, müssen Sie eine entsprechende Regel konfigurieren.</div>';
 $string['confirmationonnotificationyesforall'] = 'Ja, für alle benachrichtigten BenutzerInnen';
 $string['confirmationonnotificationyesoneatatime'] = 'Ja, Bestätigung jeweils nur für eine/n Benutzer/in';
@@ -1953,6 +1952,9 @@ $string['profeatures:appearance'] = '<ul>
 <li><b>Modale (Fenster) ausschalten</b></li>
 <li><b>Optionen für Anwesenheitsstatus</b></li>
 </ul>';
+$string['profeatures:approval'] = '<ul>
+<li><b>Bestätigungsworkflows aktivieren</b></li>
+</ul>';
 $string['profeatures:automaticcoursecreation'] = '<ul>
 <li><b>Benutzerdefiniertes Buchungsoptionfeld, das als Kurskategorie von automatisch erstellten Kursen verwendet werden soll</b></li>
 <li><b>Markieren Sie den Kurs mit Tags, um ihn als Vorlage zu verwenden</b></li>
@@ -2102,6 +2104,7 @@ die Buchungsoptionen, bei denen Sie eingetragen sind, zu editieren und Teilnehme
 <b>Wichtig:</b> Die Kontaktperson braucht zusätzlich das Recht <b>mod/booking:addeditownoption</b>.';
 $string['responsiblecontactenroltocourse'] = 'Kontaktperson in verbundenen Moodle-Kurs einschreiben';
 $string['responsiblecontactenroltocourse_desc'] = 'Bitte definieren Sie auch die Rolle, die die Kontaktperson im verbundenen Moodle-Kurs haben soll.';
+$string['responsiblecontactshowfirstteacher'] = 'Auf der Detailseite die erste Trainer:in als Kontaktperson anzeigen, falls keine Kontaktperson gesetzt ist.';
 $string['restresponse'] = "rest_response";
 $string['restrictanswerperiodclosing'] = 'Buchen nur bis zu einem bestimmten Zeitpunkt ermöglichen';
 $string['restrictanswerperiodopening'] = 'Buchen erst ab einem bestimmten Zeitpunkt ermöglichen';
