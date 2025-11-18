@@ -1069,9 +1069,16 @@ class mod_booking_mod_form extends moodleform_mod {
 
         $mform->hideIf('cancelrelativedate', 'cancancelbook', 'eq', 0);
         $mform->hideIf('cancelrelativedate', 'disablecancel', 'neq', 0);
+
+        $previoussetting = booking::get_value_of_json_by_key($bookingid, 'cancelrelativedate');
+        if (!$previoussetting) {
+            $canceldefault = (int) get_config('booking', 'defaultcanceldate') ?? MOD_BOOKING_CANCANCELBOOK_RELATIVE;
+        } else {
+            $canceldefault = (int) $previoussetting;
+        }
         $mform->setDefault(
             'cancelrelativedate',
-            (int)booking::get_value_of_json_by_key($bookingid, 'cancelrelativedate') ?? MOD_BOOKING_CANCANCELBOOK_RELATIVE
+            $canceldefault
         );
 
         $mform->addElement('date_time_selector', 'allowupdatetimestamp', get_string('canceldateabsolute', 'mod_booking'));
@@ -1411,6 +1418,22 @@ class mod_booking_mod_form extends moodleform_mod {
             null,
             ['subdirs' => 0, 'maxbytes' => $CFG->maxbytes, 'maxfiles' => 1, 'accepted_types' => ['image']]
         );
+
+        // Add the new settings dropdown for the sign-in sheet top orientation.
+        $orientationoptions = [
+            'L' => get_string('pdflandscape', 'mod_booking'),
+            'P' => get_string('pdfportrait', 'mod_booking'),
+        ];
+
+        $mform->addElement(
+            'select',
+            'toporientation',
+            get_string('signinsheettoporientation', 'mod_booking'),
+            $orientationoptions
+        );
+        $mform->addHelpButton('toporientation', 'signinsheettoporientationdesc', 'mod_booking');
+        $mform->setDefault('toporientation', 'P');
+        $mform->setType('toporientation', PARAM_ALPHA);
 
         // Teachers.
         $mform->addElement(

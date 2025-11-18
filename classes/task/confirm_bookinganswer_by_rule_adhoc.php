@@ -118,7 +118,6 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
 
             // We might receive an error here, because we refer to cmids which no longer exist.
             // That's not a problem, we just abort sending the task.
-
             try {
                 // Check if booking option has confirmationonnotification enabled,
                 // in this case we need to set some settings for the booking answer record
@@ -131,8 +130,6 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
                     );
                     return;
                 }
-
-                $optionsettings = singleton_service::get_instance_of_booking_option_settings($taskdata->optionid);
                 // Run the main process.
                 // Get sprecific booking answer record.
                 $bookinganswer = $DB->get_record('booking_answers', [
@@ -141,14 +138,17 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
                     'waitinglist' => MOD_BOOKING_STATUSPARAM_WAITINGLIST,
                 ]);
 
-                // The record of booking answer for an optoon with price will be updated to set confirmation json.
-                // And the record of booking answers with no price price will be updated to set
-                // waiting list to 0 as it should be confirmed.
-                if ($optionsettings->jsonobject->useprice == 0) {
-                    $user = singleton_service::get_instance_of_user($taskdata->userid);
+                $user = singleton_service::get_instance_of_user($taskdata->userid);
+                // Get the price for the user.
+                // Sometimes the option is free for the user even when the option has a price (userprice = 1).
+                // In this case, the option should be booked automatically for the user.
+                $userprice = \mod_booking\price::get_price('option', $optionsettings->id, $user);
+
+                if ($optionsettings->jsonobject->useprice == 0 || $userprice['price'] == 0) {
                     $option = singleton_service::get_instance_of_booking_option($optionsettings->cmid, $optionsettings->id);
                     $option->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
                 } else {
+                    // Option with price -> update json.
                     // Update booking answer.
                     booking_option::write_user_answer_to_db(
                         $bookinganswer->bookingid,
@@ -160,7 +160,7 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
                         null,
                         MOD_BOOKING_BO_SUBMIT_STATUS_CONFIRMATION,
                         "",
-                        0
+                        MOD_BOOKING_STATUSPARAM_WAITINGLIST_CONFIRMED
                     );
 
                     // Set json to null for all other users on waiting list for this optuion
@@ -187,7 +187,7 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
                                 null,
                                 MOD_BOOKING_BO_SUBMIT_STATUS_UN_CONFIRM,
                                 "",
-                                0
+                                MOD_BOOKING_STATUSPARAM_CONFIRMATION_DELETED
                             );
                         }
                     }

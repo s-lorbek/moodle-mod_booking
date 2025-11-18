@@ -33,7 +33,6 @@ use mod_booking_generator;
 use mod_booking\bo_availability\bo_info;
 use tool_mocktesttime\time_mock;
 
-
 defined('MOODLE_INTERNAL') || die();
 global $CFG;
 require_once($CFG->dirroot . '/mod/booking/lib.php');
@@ -243,6 +242,53 @@ final class bookinghistory_test extends advanced_testcase {
     public static function booking_common_settings_provider(): array {
 
         return [
+        'maxuserbookingwaitinglistconfirmed' => [
+            [   'pluginsettings' => [
+                    [
+                        'component' => 'booking',
+                        'key' => 'maxperuser',
+                        'value' => 1,
+                    ],
+                    [
+                        'component' => 'bookingextension_confirmation_trainer',
+                        'key' => 'confirmation_trainer_enabled',
+                        'value' => 1,
+                    ],
+                ],
+                'coursesettings' => [
+                    'firstcourse' => [
+                        'enablecompletion' => 1,
+                    ],
+                ],
+                'userssettings' => [
+                    'student1' => [],
+                ],
+                'bookingsettings' => [
+                    [
+                        'cancancelbook' => 0,
+                    ],
+                ],
+                'optionsettings' => [
+                    [
+                        'useprice' => 0, // Disable price for this option.
+                        'maxanswers' => 1,
+                        'maxoverbooking' => 0,
+                        'waitforconfirmation' => 1,
+                        'confirmationtrainerenabled' => 1,
+                    ],
+                ],
+            ],
+            [
+                'bookitresults' => [
+                    MOD_BOOKING_BO_COND_ONWAITINGLIST,
+                    MOD_BOOKING_BO_COND_ALREADYBOOKED,
+                ],
+                'historystatus' => [
+                    MOD_BOOKING_STATUSPARAM_WAITINGLIST,
+                    MOD_BOOKING_STATUSPARAM_WAITINGLIST_CONFIRMED,
+                ],
+            ],
+        ],
         'userbooksandcancels' => [
 
             [   'pluginsettings' => [
@@ -465,7 +511,6 @@ final class bookinghistory_test extends advanced_testcase {
         ],
         ];
     }
-
 
     /**
      * Provides the data that's constant for the test.

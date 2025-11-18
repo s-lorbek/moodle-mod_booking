@@ -282,6 +282,23 @@ class onwaitinglist implements bo_condition {
             $description = $full ? get_string('bocondonwaitinglistfullavailable', 'mod_booking') :
                 get_string('bocondonwaitinglistavailable', 'mod_booking');
         } else {
+            if ($settings->waitforconfirmation > 0) {
+                // We need a separate string when waitinglist is only waiting for confirmation.
+                $ba = singleton_service::get_instance_of_booking_answers($settings);
+                // The answer will have the confirmation key.
+                $usersonwaitinglist = $ba->get_usersonwaitinglist();
+                if ($useranswer = $usersonwaitinglist[$userid] ?? false) {
+                    $jsonobject = !empty($useranswer->json) ? json_decode($useranswer->json) : (object)[];
+                    $confirmationcount = confirmation::get_required_confirmation_count($settings->id);
+                    if (
+                        empty($jsonobject->confirmationcount)
+                        || $jsonobject->confirmationcount < $confirmationcount
+                    ) {
+                        return get_string('bocondonwaitinglistwaitforconfirmation', 'mod_booking');
+                    }
+                }
+            }
+
             if (get_config('booking', 'waitinglistshowplaceonwaitinglist')) {
                 $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
                 $placeonwaitinglist = $bookinganswer->return_place_on_waitinglist($userid);

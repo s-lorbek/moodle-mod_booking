@@ -194,6 +194,9 @@ class bookingoption_description implements renderable, templatable {
     /** @var array $subpluginstemplatedata */
     private $subpluginstemplatedata = [];
 
+    /** @var bool $showdownloadcheckbox */
+    private $showdownloadcheckbox = false;
+
     /**
      * Constructor.
      *
@@ -373,6 +376,15 @@ class bookingoption_description implements renderable, templatable {
             }
         }
 
+        if (has_capability('mod/booking:downloadchecklist', $modcontext)) {
+            $checkboxurl = $link = new moodle_url($CFG->wwwroot . '/mod/booking/report.php', [
+                'id' => $cmid,
+                'optionid' => $optionid,
+                'action' => 'downloadchecklist',
+            ]);
+            $this->showdownloadcheckbox = $checkboxurl;
+        }
+
         // We need this to render a link to manage bookings in the template.
         if (!empty($this->showmanageresponses) && $this->showmanageresponses == true) {
             if (is_array($this->bookinginformation)) {
@@ -419,8 +431,8 @@ class bookingoption_description implements renderable, templatable {
         $this->teachers = $colteacher->teachers;
 
         // Array User object of the responsible contact.
-        $responsibles = $settings->responsiblecontactuser;
-
+        // Mustache does not like associative arrays, so we make sure, we have array values only.
+        $responsibles = array_values($settings->responsiblecontactuser);
 
         // If no responsible contact is set, we take the first teacher.
         if (
@@ -679,6 +691,7 @@ class bookingoption_description implements renderable, templatable {
             'competencies' => $this->competencies,
             'competencyheader' => $this->competencyheader,
             'subpluginstemplatedata' => $this->subpluginstemplatedata,
+            'showdownloadcheckbox' => $this->showdownloadcheckbox,
         ];
 
         if (!empty($this->timeremaining)) {
@@ -728,7 +741,6 @@ class bookingoption_description implements renderable, templatable {
                 }
             }
         }
-
         return $returnarray;
     }
 

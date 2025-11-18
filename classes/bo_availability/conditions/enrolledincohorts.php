@@ -182,25 +182,17 @@ class enrolledincohorts implements bo_condition {
                 $where = "
                     (
                         availability IS NOT NULL
-                        AND NOT EXISTS (
-                            SELECT 1
-                            FROM jsonb_array_elements(availability::jsonb) elem
-                            WHERE elem ->> 'sqlfilter' = '1'
-                        )
+                        AND NOT (availability::jsonb @> '[{\"sqlfilter\":\"1\"}]')
                     )";
             } else if (
                 $databasetype == 'mysql'
                 && db_is_at_least_mariadb_106_or_mysql_8() // JSON_TABLE is only available in MariaDB 10.6+ and MySQL 8.0+.
             ) {
                 $where = "
-                (
-                    availability IS NOT NULL
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM JSON_TABLE(availability, '$[*]' COLUMNS (sqlfilter VARCHAR(10) PATH '$.sqlfilter')) jt
-                        WHERE jt.sqlfilter = '1'
-                    )
-                )";
+                    (
+                        availability IS NOT NULL
+                        AND NOT JSON_CONTAINS(availability, '{\"sqlfilter\":\"1\"}', '$')
+                    )";
             } else {
                 return ["", "", "", $params, ""];
             }
@@ -226,12 +218,14 @@ class enrolledincohorts implements bo_condition {
             // Default is AND - all cohorts must be met by user.
             $where = "
             availability IS NOT NULL
-            AND ((NOT EXISTS (
-                            SELECT 1
-                            FROM jsonb_array_elements(availability::jsonb) elem
-                            WHERE elem ->> 'sqlfilter' = '1'
-                        ))
-                OR (CASE
+            AND
+            (
+                (
+                    NOT (availability::jsonb @> '[{\"sqlfilter\":\"1\"}]')
+                )
+                OR
+                (
+                    CASE
                     WHEN (availability::jsonb->0->>'cohortidsoperator') = 'OR' THEN
                         EXISTS (
                             SELECT 1
@@ -271,11 +265,7 @@ class enrolledincohorts implements bo_condition {
             $where = "
                 availability IS NOT NULL
                 AND ((
-                    (NOT EXISTS (
-                        SELECT 1
-                        FROM JSON_TABLE(availability, '$[*]' COLUMNS (sqlfilter VARCHAR(10) PATH '$.sqlfilter')) jt
-                        WHERE jt.sqlfilter = '1'
-                    ))
+                    (NOT JSON_CONTAINS(availability, '{\"sqlfilter\":\"1\"}', '$'))
                 )
                 OR (
                     id IN (
@@ -349,7 +339,7 @@ class enrolledincohorts implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_MYALERT];
     }
@@ -545,7 +535,7 @@ class enrolledincohorts implements bo_condition {
             $conditionobject->class = $classname;
             $conditionobject->cohortids = $fromform->bo_cond_enrolledincohorts_cohortids;
             $conditionobject->cohortidsoperator = $fromform->bo_cond_enrolledincohorts_cohortids_operator;
-            $conditionobject->sqlfilter = $fromform->bo_cond_enrolledincohorts_sqlfiltercheck ?? 0;
+            $conditionobject->sqlfilter = (string) ($fromform->bo_cond_enrolledincohorts_sqlfiltercheck ?? 0);
 
             if (!empty($fromform->bo_cond_enrolledincohorts_overrideconditioncheckbox)) {
                 $conditionobject->overrides = $fromform->bo_cond_enrolledincohorts_overridecondition;
@@ -656,7 +646,7 @@ class enrolledincohorts implements bo_condition {
             $coursestringsarr = [];
             foreach ($this->customsettings->cohortids as $cohortid) {
                 $cohort = singleton_service::get_cohort($cohortid);
-                if (!empty($cohort)) {
+                if (!empty($cohort->name)) {
                     $coursestringsarr[] = $cohort->name;
                 }
             }

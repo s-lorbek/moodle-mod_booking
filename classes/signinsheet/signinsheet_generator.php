@@ -337,7 +337,7 @@ class signinsheet_generator {
      * @return void
      */
     public function prepare_html() {
-        global $DB;
+        global $DB, $PAGE;
         $addsqlwhere = '';
         $groupparams = [];
         $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
@@ -488,6 +488,31 @@ class signinsheet_generator {
                 '[[address]]' => $user->address ?? '',
                 '[[places]]' => $user->places ?? '',
             ];
+
+            // Get all custom user profile fields and add them as placeholders.
+            $customuserfields = $DB->get_records('user_info_field');
+            foreach ($customuserfields as $customuserfield) {
+                $fieldtype = $customuserfield->datatype;
+                $shortname = $customuserfield->shortname;
+                if ($fieldtype == 'datetime') {
+                    $cleanvalue = $user->$shortname ?? 0;
+                    $value = $cleanvalue != 0 ? userdate($user->$shortname, get_string('strftimedate', 'langconfig')) : '';
+                } else {
+                    $value = $user->$shortname ?? '';
+                }
+                $replacements['[[' . $shortname . ']]'] = $value ?? '';
+            }
+
+            $userobj = singleton_service::get_instance_of_user($user->id);
+            $userpic = new user_picture($userobj);
+            if (empty($userpic)) {
+                $replacements['[[userpic]]'] = '';
+            } else {
+                $userpictureurl = $userpic->get_url($PAGE);
+                $out = $userpictureurl->out();
+                $replacements['[[userpic]]'] = '<img src="' . $out . '"/>';
+            }
+
             $sessioncols = str_repeat('<td></td>', count($extrasessioncols));
             foreach ($replacements as $placeholder => $realvalue) {
                 $row = str_replace($placeholder, $realvalue, $row);
@@ -538,8 +563,7 @@ class signinsheet_generator {
                 $this->signinsheetlogo->get_filepath(),
                 $this->signinsheetlogo->get_filename()
             );
-
-             $src = $url->out();
+            $src = $url->out();
             $htmloutput = str_replace('[[logourl]]', $src, $htmloutput);
         }
 
@@ -685,7 +709,6 @@ class signinsheet_generator {
             'fullname',
             'firstname',
             'lastname',
-            'email',
             'signature',
             'rownumber',
             'role',

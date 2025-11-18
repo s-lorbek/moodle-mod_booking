@@ -33,6 +33,7 @@ use mod_booking\booking_option;
 use mod_booking\booking_rules\rules_info;
 use mod_booking\calendar;
 use mod_booking\elective;
+use mod_booking\event\booking_debug;
 use mod_booking\event\bookinganswer_presencechanged;
 use mod_booking\event\bookinganswer_notesedited;
 use mod_booking\event\bookingoption_booked;
@@ -178,6 +179,25 @@ class mod_booking_observer {
                 $DB->delete_records('booking_userevents', ['id' => $record->id]);
             }
         };
+
+        $optionid = $event->objectid;
+        cache_helper::invalidate_by_event('setbackoptionsanswers', [$optionid]);
+    }
+
+    /**
+     * Checkout completed event.
+     *
+     * @param \local_shopping_cart\event\checkout_completed $event
+     * @throws dml_exception
+     */
+    public static function checkout_completed(\local_shopping_cart\event\checkout_completed $event) {
+        // We need this to correctly update receipts for installment payments.
+        if (
+            $event->other['componentname'] == 'mod_booking'
+            && $event->other['area'] == 'option'
+        ) {
+            cache_helper::invalidate_by_event('setbackoptionsanswers', [$event->other['itemid']]);
+        }
     }
 
     /**
@@ -209,6 +229,8 @@ class mod_booking_observer {
                 calendar::delete_booking_userevents_for_option($optionid, $user->id);
             }
         };
+        $optionid = $event->objectid;
+        booking_option::purge_cache_for_option($optionid);
     }
 
     /**
@@ -325,6 +347,15 @@ class mod_booking_observer {
     }
 
     /**
+     * Booking option date deleted.
+     *
+     * @param \mod_booking\event\bookingoptiondate_deleted $event
+     */
+    public static function bookingoptiondate_deleted(\mod_booking\event\bookingoptiondate_deleted $event) {
+        // Implement if necessary.
+    }
+
+    /**
      * When a booking option is completed, we send a mail to the user (as long as sendmail is activated).
      *
      * @param \mod_booking\event\bookingoption_completed $event
@@ -432,7 +463,18 @@ class mod_booking_observer {
         rules_info::collect_rules_for_execution($event);
         if (PHPUNIT_TEST) {
             // Process after every event when unit testing.
-            rules_info::filter_rules_and_execute();
+            // To avoid infinite loops, we need a counter.
+            $counter = 0;
+            while (
+                (count(rules_info::$rulestoexecute) > 0
+                || count(rules_info::$eventstoexecute) > 0)
+                && $counter < 10
+            ) {
+                rules_info::filter_rules_and_execute();
+
+                rules_info::events_to_execute();
+                $counter++;
+            }
         }
     }
 
@@ -448,26 +490,46 @@ class mod_booking_observer {
         global $DB, $CFG;
 
         // Check if there is an associated booking_answer with status 'booked' for the userid and courseid.
-        $sql = 'SELECT ba.userid, bo.courseid, ba.optionid, ba.completed
+        $sql = 'SELECT ba.id, ba.userid, bo.courseid, ba.optionid, ba.completed
                 FROM {booking_answers} ba
                 JOIN {booking_options} bo
                 ON ba.optionid = bo.id
                 WHERE ba.userid = :userid AND ba.waitinglist = 0 AND bo.courseid = :courseid';
         $params = ['userid' => $event->relateduserid, 'courseid' => $event->courseid];
-
+        if (get_config('booking', 'bookingdebugmode')) {
+            $event = booking_debug::create([
+                'objectid' => $event->courseid,
+                'context' => context_system::instance(),
+                'relateduserid' => $event->relateduserid,
+                'other' => [
+                    'eventparams' => json_encode($event),
+                ],
+            ]);
+            $event->trigger();
+        }
         // Only execute if there are associated booking_answers.
         if ($bookedanswers = $DB->get_records_sql($sql, $params)) {
             // Call the enrolment function.
             elective::enrol_booked_users_to_course();
+        }
+        if (get_config('booking', 'bookingdebugmode')) {
+            $event = booking_debug::create([
+                'objectid' => $event->courseid,
+                'context' => context_system::instance(),
+                'relateduserid' => $event->relateduserid,
+                'other' => [
+                    'bookedanswers' => json_encode($bookedanswers),
+                ],
+            ]);
+            $event->trigger();
         }
         if (!empty($bookedanswers) && get_config('booking', 'automaticbookingoptioncompletion')) {
             require_once($CFG->dirroot . '/mod/booking/lib.php');
             foreach ($bookedanswers as $bookedanswer) {
                 $settings = singleton_service::get_instance_of_booking_option_settings($bookedanswer->optionid);
                 $bookingoption = singleton_service::get_instance_of_booking_option($settings->cmid, $settings->id);
-                if (empty($bookedanswer->completion)) {
+                if (empty($bookedanswer->completed)) {
                     $bookingoption->toggle_user_completion($bookedanswer->userid);
-
                 }
             }
         }
@@ -605,5 +667,58 @@ class mod_booking_observer {
         $customformstore = new customformstore($eventdata['userid'], $eventdata['other']['itemid']);
         $customformstore->delete_customform_data();
         return;
+    }
+
+    /**
+     * Observer for the competency_updated event.
+     *
+     * @param \core\event\competency_updated $event
+     */
+    public static function competency_updated(\core\event\competency_updated $event): void {
+        $competencyid = (int)$event->objectid;
+        cache_helper::invalidate_by_event('setbackcompetenciesshortnamescache', [$competencyid]);
+    }
+
+    /**
+     * Observer for the competency_deleted event.
+     *
+     * @param \core\event\competency_deleted $event
+     */
+    public static function competency_deleted(\core\event\competency_deleted $event): void {
+        cache_helper::purge_by_event('setbackusercompetenciescache');
+    }
+
+    /**
+     * Observer for the competency_user_competency_rated event.
+     *
+     * @param \core\event\competency_user_competency_rated $event
+     */
+    public static function competency_user_competency_rated(\core\event\competency_user_competency_rated $event): void {
+        $userid = (int)$event->relateduserid;
+        cache_helper::invalidate_by_event('setbackusercompetenciescache', [$userid]);
+    }
+
+    /**
+     * Observer for the competency_user_competency_rated_in_plan event.
+     *
+     * @param \core\event\competency_user_competency_rated_in_plan $event
+     */
+    public static function competency_user_competency_rated_in_plan(
+        \core\event\competency_user_competency_rated_in_plan $event
+    ): void {
+        $userid = (int)$event->relateduserid;
+        cache_helper::invalidate_by_event('setbackusercompetenciescache', [$userid]);
+    }
+
+    /**
+     * Observer for the competency_user_competency_rated_in_course event.
+     *
+     * @param \core\event\competency_user_competency_rated_in_course $event
+     */
+    public static function competency_user_competency_rated_in_course(
+        \core\event\competency_user_competency_rated_in_course $event
+    ): void {
+        $userid = (int)$event->relateduserid;
+        cache_helper::invalidate_by_event('setbackusercompetenciescache', [$userid]);
     }
 }

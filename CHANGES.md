@@ -1,3 +1,195 @@
+## Version 8.18.1 (2025111001)
+* Improvement: Create test for session reminders via rules.
+* Improvement: Delete booking answers cache for option after successful checkout.
+* Improvement: Supervisorteamreduced only shows booked users.
+* Improvement: Mycourseslist now supports "futureonly" param.
+* Improvement: Enable import of competencies (value in string format).
+* Improvement: Add debug event when option can't be created.
+* Bugfix: For updated sessions send mail only once.
+* Bugfix: Removed extra AND from the query.
+* Bugfix: Limit get_record in booking_answers table to make sure it's unique.
+* Bugfix: Book the option with a price for a student whose price category is 0.
+* Bugfix: Futureonly triggered on the right point.
+* Bugfix: Only schedule mail task for active users.
+* Bugfix: Append certificate to bookingoption_booked event to enable correct placeholder.
+* Bugfix: Wrong scope in supervisorteam shortcode.
+* Bugfix: Add reduced property.
+* Bugfix: Add missing variable counter.
+* Bugfix: Fix reduced region in booking_answers table to make sure it's unique.
+
+## Version 8.18.0 (2025110300)
+* Improvement: New helper function in shortcodes handler to check if arguments are really true.
+* Improvement: Default for uselegacymailtemplates setting should be turned off.
+* Improvement: Correct strings for signinsheethtml description.
+* Improvement: Purge or invalidate affected caches when booking answers or options are cancelled.
+* Improvement: Reduced versions of optiontoconfirm and supervisorteam with the possibility to include customfields.
+* Improvement: Store pricecategory in bookinganswer field and add tests.
+* Improvement: New column pricecategory in booking_answers table.
+* Improvement: Add test for creation of date series.
+* Bugfix: Fix selector for download signinsheet shortcut button.
+* Bugfix: Execute booking rule on cancel purchase shoppingcart.
+* Bugfix: Signature in wrong function.
+* Bugfix: Fallback for invisible change tracking.
+* Bugfix: Certificate files are now created as files when issued.
+* Bugfix: CSV import loses cmid when done twice in a row.
+* Bugfix: Duplicate option without course correctly.
+* Bugfix: Stop sending scheduled mails on rule change based on event.
+* Bugfix: Only delete files if they exist.
+
+## Version 8.17.8 (2025101600)
+* Improvement: Test conditions of rule
+* Improvement: More precise message for freetobookagain description
+* Improvement: Better tracking of history status update un/confirmation via task
+* Improvement: track changes for easy fields
+* Improvement: Store changes in availability json in bookingoption_updated event
+* Bugfix: Background color for booking button under Moodle 5
+* Bugfix: Don't throw error on deselecting a template
+* Bugfix: Correctly resolve "&" in subject of message provider
+* Bugfix: Trigger waitingforconfirmation event correctly
+* Bugfix: Confirmation entry in booking history contains userid
+
+## Version 8.17.7 (2025101400)
+* Improvement: Handle ICS attachment errors with try-catch and trigger booking debug event
+* Improvement: Check the 'noemailever' global config when sending mails via PHPMailer for iCal emailing.
+* Improvement: Check number of option dates and prevent use ical as inline data when grater than one.
+* Bugfix: Don't block with waitinglist when waitinglist is unlimited
+* Bugfix: show "unlimited" waitinglist for downloads as well
+* Bugfix: select proper waitinglistplacesinfotext in case of unlimited waitinglist
+* Bugfix: Optiontemplatesettings should not be sortable
+* Bugfix: Reorganize order of execution in the completion chain
+* Bugfix: supsended users are now ignored for mailings
+* Bugfix: Correctly find context in user selector
+* Bugfix: Fixed ical to send messages via PHPMailer
+* Bugfix: Check if ICS file already exists and delete it before creation to prevent duplication errors.
+* Bugfix: Add missing strings of capabilities
+* Bugfix: Send mail to users from bookingoption_cancelled event
+* Linting: Apply Moodle Standard Updates
+* Tests: extend behat test for the .../admin/roles/define.php?action=edit&roleid=3 (teacher) to check missing strings in capabilities
+
+## Version 8.17.6 (2025100700)
+* New feature: Condition for rules to select deputies of supervisor (nested profile field logic) #1149
+* Improvement: Display mail in sign-in sheet
+* Improvement: Add bookingoptionimage to bulkoperations
+* Improvement: Don't use static acceleration for bookingoptionsanswers cache
+* Improvement: Add Ajax loading to shared places for speedup
+* Improvement: Add Ajax loading to previously booked for speedup
+* Bugfix: Don't delete previously booked records when deleting a user response
+* Bugfix: treat both id and optionid identificators in case of new option
+* Bugfix: Catch error when we can't delete stored file
+* Bugfix: Correctly block booking with unlimited waitinglist
+* Bugfix: Resolved query search in 'optionstoconfirm' search.
+* Bugfix: Add timebooked col correctly to answers table
+* Tests: phpunit: add waitinglist with maxperuser scenarios (#1145)
+
+## Version 8.17.5 (2025100100)
+* Improvement: Duplicate bookingoptions not a pro setting #1136
+* Improvement: Improve strings for waitforconfirmation select
+* Improvement: Accessibility: Remove role="alert" from bookit button
+* Bugfix: Display names according to full class name
+* Bugfix: Never put reserved on waitinglist instead of usersonlist
+* Bugfix: Pass on param to only execute parts of sync waitinglist when we are updating option
+* Bugfix: Add capability check when executing sync waitinglist with delete
+* Bugfix: Add another check of existing setting keepusersbookedonreducingmaxanswers
+* Bugfix: Default value of 'keepusersbookedonreducingmaxanswers' is on
+* Bugfix: Execute booking rule on cancel purchase shoppingcart
+* Tests: New behat Scenario: Booking option: cashier use list generated by shortcode to brough option for user
+
+## Version 8.17.4 (2025092300)
+* New Feature: Allow Multiple bookings
+* New Feature: Show team bookings for supervisor (supervisorteam shortcode)
+* New Feature: New hascompetency condition.
+* Improvement: Add deputies via select modal
+* Improvement: Add special string for waiting for confirmation
+* Improvement: Confirm users on waitinglist and sync them only when allowed
+* Improvement: Possibility to exclude booknow button in shortcodes
+* Improvement: Allow for old bookings to be completed and issue certificates
+* Improvment: Add argument statuswaitinglist to mycourselist shortcode to also show waitinglist options
+* Improvement: Make the labels of the tables in booked_users.mustache dynamic.
+* Improvement: New capability for importoptions
+* Improvement: Setting to set toggle always to book anyone
+* Improvement: Apply competency via task, if no moodle/competency:competencygrade capability
+* Bugfix: Correctly apply old date for old certificates
+* Bugfix: course completed observer has now an unique column
+* Bugfix: Add booknow everywhere we need it
+* Bugfix: Set timebooked to 0 where it is not set.
+* Bugfix: Fix time comparison condition.
+* Bugfix: fix vulnerabilities vue for display in dashboard
+* Bugfix: Enable edit_rules on context sys for users with capability
+* Bugfix: Correct description for duplicatebookingoptions
+* Test: Created new test for coursecompletion triggers bookingoptioncompletion
+
+## Version 8.17.3 (2025091901)
+* Improvement: Introduce Bootstrap 5 and make adjustments to prepare for Moodle 5 version.
+* Improvement: Fixes for ical (*.ics) files.
+
+## Version 8.17.2 (2025091900)
+* Bugfix: Don't use singleton pattern on bookforuser function.
+
+## Version 8.17.1 (2025091800)
+* Improvement: Check capability for recalculateprices.
+* Improvement: Add contains-partially-option for circumvent condition.
+* Tests: Improve and fix some phpunit and behat tests.
+
+## Version 8.17.0 (2025091700)
+* Feature: New hascompetency condition.
+* Improvement: Restore singleton after purging cache.
+* Improvement: Fixes for ical (*.ics) files.
+* Performance: Invalidate cache on clicking on bookit.
+* Performance: Better use of singleton patterns.
+* Performance: Avoid unnecessary DB call.
+* Performance: Don't render descriptions we don't need.
+* Bugfix: In unsubscribe.php we need to purge answers cache, not options cache!
+* Bugfix: Fix bug in selection of template courses.
+* Bugfix: Fixed skipping of Booking Rules.
+* Bugfix: Correct status for subbooking.
+* Bugfix: Responsible contacts - Mustache does not like associative arrays, so we make sure, we have array values only.
+* Bugfix: Fix exception when creating date series with empty text area.
+* Bugfix: Course completed observer has now a unique column.
+* Bugfix: Small typo completion.
+* Bugfix: Added missing language string.
+* Bugfix: Remove unnecessary PAGE context fix.
+* Bugfix: Fix unit tests, linting and improve code quality.
+* Bugfix: Subbookings create shortterm reservations in booking answers.
+* Bugfix: Don't set idnumber of targetcourse (fixes indumbertaken error).
+* Tests: Final fix for condition_hascompetency_test - enrol users as students to course.
+* Tests: Add PHPUnit tests for ICS calendar generation in mod_booking.
+* Tests: Check if message is sent on book event.
+
+## Version 8.16.2 (2025091000)
+* Feature: Added coursestarttime to shortcodes.
+* Improvement: Add filteronloadaction param to shortcode allbookingoptions.
+* Improvement: Better performance when showing description in table.
+* Improvement: Better Javascript performance.
+* Improvement: Delete unnecessary key confirmationnotificationoneatatime.
+* Improvement: Fix description for bookingextension.
+* Improvement: Increase the static acceleration size for better performance.
+* Improvement: Better performance during availability checks.
+* Improvement: Return image URL in bookings webservice.
+* Improvement: Possibility to only show completed courses in mybookings.
+* Improvement: New setting to show first teacher as responsible contact on teachers page.
+* Improvement: Make links configurable in bookingtracker_helper for column text in manageusers_table.
+* Improvement: Performance improvement for when there are many sessions – check output before production.
+* Bugfix: Possible behat fix – wait until booking history is loaded.
+* Bugfix: Replace report2option link with optionlink for col_text.
+* Bugfix: Missing isset checks for change array.
+* Bugfix: Cast to float for format_float.
+* Bugfix: Fix campaign string.
+* Bugfix: No format_float in apply_campaigns.
+* Bugfix: Prepage modals work again normally with performance improved JS.
+* Bugfix: Make sure we look for the bookingmanager only once per cache cycle.
+* Bugfix: Fix image URL creation.
+* Bugfix: Fix for case if $values->scope is not set or empty.
+* Bugfix: Correctly use allowedtobookinstance singleton.
+* Bugfix: Fix PHP 7.4 compatibility.
+* Bugfix: Fix behat (invisible characters).
+* Bugfix: Fix PHPUnit (invisible characters).
+* Bugfix: Fix for the case if $boinfo['iamreserved'] is empty.
+* Bugfix: Make sure to add subbooking persons to the right user answer.
+* Bugfix: Validation for subbooking places.
+* Bugfix: Don't proceed with sending mail if no user was found.
+* Bugfix: Small fix for shopping cart errors display.
+* Bugfix: No line break between price and currency.
+
 ## Version 8.16.1 (2025090401)
 * Improvement: Better info string for enrol multiple users.
 * Improvement: Localize prices with format_float.

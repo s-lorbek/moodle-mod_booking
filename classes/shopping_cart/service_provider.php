@@ -79,6 +79,9 @@ class service_provider implements \local_shopping_cart\local\callback\service_pr
 
             $item = booking_bookit::answer_booking_option($area, $itemid, MOD_BOOKING_STATUSPARAM_RESERVED, $userid);
 
+            if (empty($item)) {
+                return ['error' => 'novalidarea'];
+            }
             // Initialize.
             $serviceperiodstart = $item['coursestarttime'];
             $serviceperiodend = $item['courseendtime'];
@@ -163,7 +166,7 @@ class service_provider implements \local_shopping_cart\local\callback\service_pr
         } else if (strpos($area, 'subbooking') === 0) {
             // As a subbooking can have different slots, we use the area to provide the subbooking id.
             // The syntax is "subbooking-1" for the subbooking id 1.
-            $item = booking_bookit::answer_subbooking_option($area, $itemid, $userid);
+            $item = booking_bookit::answer_subbooking_option($area, $itemid, MOD_BOOKING_STATUSPARAM_RESERVED, $userid);
 
             // Initialize.
             $serviceperiodstart = $item['coursestarttime'];
@@ -329,7 +332,13 @@ class service_provider implements \local_shopping_cart\local\callback\service_pr
         require_once($CFG->dirroot . '/mod/booking/lib.php');
 
         if ($area === 'option') {
-            booking_bookit::answer_booking_option($area, $itemid, MOD_BOOKING_STATUSPARAM_DELETED, $userid);
+            booking_bookit::answer_booking_option(
+                $area,
+                $itemid,
+                MOD_BOOKING_STATUSPARAM_DELETED,
+                $userid,
+                true
+            );
             return true;
         } else if (strpos($area, 'subbooking') === 0) {
             // As a subbooking can have different slots, we use the area to provide the subbooking id.

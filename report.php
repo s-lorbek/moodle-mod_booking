@@ -225,6 +225,12 @@ if ($action == 'downloadsigninsheet') {
     die();
 }
 
+if ($action == 'downloadchecklist') {
+    $pdf = new mod_booking\checklist\checklist_generator($bookingoption);
+    $pdf->generate_pdf();
+    die();
+}
+
 if (
     $action == 'copytotemplate' && has_capability('mod/booking:manageoptiontemplates', $context) &&
          confirm_sesskey()
@@ -994,7 +1000,8 @@ if (!$tableallbookings->is_downloading()) {
 
     // Button to download signin sheet.
     $actionbuttonstop .=
-        '<button class="btn btn-primary btn-sm mr-2" id="downloadsigninsheet-top-btn">
+        '<button class="btn btn-primary btn-sm mr-2" id="downloadsigninsheet-top-btn" buttonaction='
+        . $bookingoption->booking->settings->toporientation . '
             <i class="fa fa-download fa-fw" aria-hidden="true"></i>&nbsp;' .
             get_string('signinsheetdownload', 'mod_booking') .
         '</button>';
@@ -1279,7 +1286,9 @@ if (!$tableallbookings->is_downloading()) {
             '<i class="fa fa-users" aria-hidden="true"></i>' . get_string('deletedusers', 'mod_booking'),
             [
                 'data-toggle' => "collapse",
-                'href' => "#collapseDeletedlist",
+                'data-target' => "#collapseDeletedlist",
+                'data-bs-toggle' => "collapse",
+                'data-bs-target' => "#collapseDeletedlist",
                 'role' => "button",
                 'aria-expanded' => "false",
                 'aria-controls' => "collapseDeletedlist",

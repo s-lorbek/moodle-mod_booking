@@ -69,11 +69,23 @@ class booked_users implements renderable, templatable {
     /** @var string $bookinghistory rendered table of bookinghistory */
     public $bookinghistory;
 
+    /** @var string $previouslybooked rendered table of previouslybooked */
+    public $previouslybooked;
+
     /** @var string $optionstoconfirm rendered table of options to confirm */
     public $optionstoconfirm;
 
-    /** @var string $optionstoconfirmadditionaltexts rendered additional texts for the table of options to confirm */
-    public $optionstoconfirmadditionaltexts;
+    /** @var array $deputydisplay rendered additional texts for the table of options to confirm */
+    public $deputydisplay;
+
+    /** @var string $deputyselect rendered additional texts for the table of options to confirm */
+    public $deputyselect;
+
+    /** @var array $labels Labels of the tables */
+    public $labels;
+
+    /** @var int $reduced Reduced status */
+    public $reduced;
 
     /**
      * Constructor
@@ -87,7 +99,10 @@ class booked_users implements renderable, templatable {
      * @param bool $showdeleted
      * @param bool $showbookinghistory
      * @param bool $showoptionstoconfirm
+     * @param bool $showpreviouslybooked
      * @param int $cmid optional course module id of booking instance
+     * @param bool $showreducedbuttons
+     * @param array $customfields
      */
     public function __construct(
         string $scope = 'system',
@@ -99,12 +114,23 @@ class booked_users implements renderable, templatable {
         bool $showdeleted = false,
         bool $showbookinghistory = false,
         bool $showoptionstoconfirm = false,
-        int $cmid = 0
+        bool $showpreviouslybooked = false,
+        int $cmid = 0,
+        bool $showreducedbuttons = false,
+        array $customfields = []
     ) {
         $ba = new booking_answers();
         /** @var scope_base $class */
         $class = $ba->return_class_for_scope($scope);
         $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_BOOKED);
+
+        $defalutlabels = self::default_tables_labels();
+        // Get the custom labels of the tables from the scope class.
+        if (method_exists($class, 'get_lables_of_tables')) {
+            $this->labels = $class->get_lables_of_tables($defalutlabels);
+        } else {
+            $this->labels = $defalutlabels;
+        }
 
         $this->bookedusers = $showbooked ?
             $this->render_users_table(
@@ -119,7 +145,10 @@ class booked_users implements renderable, templatable {
             ) : null;
 
         // For optiondate scope, we only show booked users.
-        if ($scope != 'optiondate') {
+        if (
+            $scope != 'optiondate'
+            || $scope != 'supervisorteamreduced'
+        ) {
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_WAITINGLIST);
             $this->waitinglist = $showwaiting ? $this->render_users_table(
                 $scope,
@@ -129,7 +158,8 @@ class booked_users implements renderable, templatable {
                 array_keys($columns),
                 array_values($columns),
                 // Sorting of waiting list only possible if setting to show place is enabled.
-                (bool)get_config('booking', 'waitinglistshowplaceonwaitinglist')
+                (bool)get_config('booking', 'waitinglistshowplaceonwaitinglist'),
+                true
             ) : null;
 
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_RESERVED);
@@ -165,8 +195,6 @@ class booked_users implements renderable, templatable {
             ) : null;
 
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_WAITINGLIST);
-            $this->optionstoconfirmadditionaltexts
-                = $this->render_additional_texts($scope, $scopeid, MOD_BOOKING_STATUSPARAM_WAITINGLIST);
             $this->optionstoconfirm = $showoptionstoconfirm ? $this->render_users_table(
                 $scope,
                 $scopeid,
@@ -175,7 +203,20 @@ class booked_users implements renderable, templatable {
                 array_keys($columns),
                 array_values($columns),
                 // Sorting of waiting list only possible if setting to show place is enabled.
-                (bool)get_config('booking', 'waitinglistshowplaceonwaitinglist')
+                (bool)get_config('booking', 'waitinglistshowplaceonwaitinglist'),
+                true,
+                $customfields,
+            ) : null;
+
+            $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED);
+            $this->previouslybooked = $showpreviouslybooked ? $this->render_users_table(
+                $scope,
+                $scopeid,
+                MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED,
+                'previouslybooked',
+                array_keys($columns),
+                array_values($columns),
+                false
             ) : null;
 
             // Booking history table.
@@ -194,6 +235,7 @@ class booked_users implements renderable, templatable {
      * @param array $headers
      * @param bool $sortable
      * @param bool $paginate
+     * @param array $customfields
      * @return ?string
      */
     private function render_users_table(
@@ -204,7 +246,8 @@ class booked_users implements renderable, templatable {
         array $columns,
         array $headers = [],
         bool $sortable = false,
-        bool $paginate = false
+        bool $paginate = false,
+        array $customfields = []
     ): ?string {
         $ba = new booking_answers();
         /** @var scope_base $class */
@@ -217,7 +260,8 @@ class booked_users implements renderable, templatable {
             $columns,
             $headers,
             $sortable,
-            $paginate
+            $paginate,
+            $customfields
         );
 
         // Activate sorting dropdown.
@@ -229,7 +273,7 @@ class booked_users implements renderable, templatable {
         $table->showreloadbutton = true;
         $table->showrowcountselect = true;
 
-        $html = $table->outhtml(20, false);
+        $html = $table->outhtml(10, false);
         return count($table->rawdata) > 0 ? $html : null;
     }
 
@@ -461,7 +505,11 @@ class booked_users implements renderable, templatable {
             'deletedusers' => $this->deletedusers ?? null,
             'bookinghistory' => $this->bookinghistory ?? null,
             'optionstoconfirm' => $this->optionstoconfirm ?? null,
-            'optionstoconfirmadditionaltexts' => $this->optionstoconfirmadditionaltexts ?? null,
+            'deputydisplay' => $this->deputydisplay ?? null,
+            'previouslybooked' => $this->previouslybooked ?? null,
+            'deputyselect' => $this->deputyselect ?? null,
+            'labels' => array_values($this->labels) ?? null,
+            'reduced' => $this->reduced ?? null,
         ]);
     }
 
@@ -521,18 +569,19 @@ class booked_users implements renderable, templatable {
     }
 
     /**
-     * Renders an additional text and returns HTML.
-     * @param string $scope
-     * @param int $scopeid
-     * @param int $statusparam
-     * @return bool|string
+     * Return an array of the default labels of the tables.
+     * @return array
      */
-    public function render_additional_texts(string $scope, int $scopeid, int $statusparam) {
-        global $OUTPUT;
-        $ba = new booking_answers();
-        /** @var scope_base $class */
-        $class = $ba->return_class_for_scope($scope);
-        $data['texts'] = $class->get_additional_texts($statusparam);
-        return $OUTPUT->render_from_template('mod_booking/additional_texts', $data);
+    public static function default_tables_labels(): array {
+        return [
+            'bookings' => get_string('bookings', 'mod_booking'),
+            'waitinglist' => get_string('waitinglist', 'mod_booking'),
+            'reservedusers' => get_string('reservedusers', 'mod_booking'),
+            'userstonotify' => get_string('userstonotify', 'mod_booking'),
+            'deletedbookings' => get_string('deletedbookings', 'mod_booking'),
+            'bookinghistory' => get_string('bookinghistory', 'mod_booking'),
+            'optionstoconfirm' => get_string('optionstoconfirm', 'mod_booking'),
+            'previouselybooked' => get_string('previouselybooked', 'mod_booking'),
+        ];
     }
 }

@@ -36,6 +36,7 @@ use local_wunderbyte_table\filters\types\intrange;
 use local_wunderbyte_table\filters\types\standardfilter;
 use local_wunderbyte_table\wunderbyte_table;
 use mod_booking\booking;
+use mod_booking\form\dynamicdeputyselect;
 use mod_booking\local\shortcode_filterfield;
 use mod_booking\output\booked_users;
 use mod_booking\shortcodes_handler;
@@ -110,6 +111,7 @@ class shortcodes {
             "bookingopeningtime",
             "bookingclosingtime",
             "coursestarttime",
+            "booknow",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -233,6 +235,7 @@ class shortcodes {
             "bookingclosingtime",
             "competencies",
             "coursestarttime",
+            "booknow",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -462,6 +465,7 @@ class shortcodes {
             "bookingopeningtime",
             "bookingclosingtime",
             "coursestarttime",
+            "booknow",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -672,6 +676,7 @@ class shortcodes {
             "bookingopeningtime",
             "bookingclosingtime",
             "coursestarttime",
+            "booknow",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -786,6 +791,11 @@ class shortcodes {
             $wherearray['completed'] = 1;
         }
 
+        $statusarray = [MOD_BOOKING_STATUSPARAM_BOOKED];
+        if (!empty($args['statuswaitinglist'])) {
+            $statusarray[] = MOD_BOOKING_STATUSPARAM_WAITINGLIST;
+        }
+
         [$fields, $from, $where, $params, $filter] =
                 booking::get_options_filter_sql(
                     0,
@@ -796,13 +806,14 @@ class shortcodes {
                     [],
                     $wherearray,
                     $userid,
-                    [MOD_BOOKING_STATUSPARAM_BOOKED],
+                    $statusarray,
                     $additionalwhere
                 );
-
+        if (!empty($args['futureonly'])) {
+            $startoftoday = time();
+            $where .= " AND courseendtime > $startoftoday ";
+        }
         $table->set_filter_sql($fields, $from, $where, $filter, $params);
-
-        // These are all possible options to be displayed in the bookingtable.
         $possibleoptions = [
             "description",
             "statusdescription",
@@ -817,6 +828,7 @@ class shortcodes {
             "bookingopeningtime",
             "bookingclosingtime",
             "coursestarttime",
+            "booknow",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -851,11 +863,11 @@ class shortcodes {
                 $table->showcountlabel = $showfilter ? true : false;
 
         if (
-                    isset($args['filterontop'])
-                    && (
-                        $args['filterontop'] == '1'
-                        || $args['filterontop'] == 'true'
-                    )
+            isset($args['filterontop'])
+            && (
+                $args['filterontop'] == '1'
+                || $args['filterontop'] == 'true'
+            )
         ) {
             $table->showfilterontop = true;
         } else {
@@ -986,6 +998,7 @@ class shortcodes {
         "minanswers",
         "bookingopeningtime",
         "bookingclosingtime",
+        "booknow",
         ];
         // When calling recommendedin in the frontend we can define exclude params to set options, we don't want to display.
 
@@ -1516,8 +1529,26 @@ class shortcodes {
 
         global $PAGE;
 
+        $requiredargs = [];
+        $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
+        if (
+            isset($error['error'])
+            && $error['error'] === 1
+        ) {
+            return $error['message'];
+        }
+        if (!empty($args['reduced'])) {
+            $scope = 'optionstoconfirmreduced';
+        } else {
+            $scope = 'optionstoconfirm';
+        }
+        if (!empty($args['cfinclude'])) {
+            $customfields = explode(',', $args['cfinclude']);
+        } else {
+            $customfields = [];
+        }
         $data = new booked_users(
-            'optionstoconfirm',
+            $scope,
             0,
             false, // Booked users.
             false, // Users on waiting list.
@@ -1525,8 +1556,27 @@ class shortcodes {
             false, // Users on notify list.
             false, // Deleted users.
             false, // Booking history.
-            true // Options to confirm.
+            true, // Options to confirm.
+            false,
+            0,
+            true,
+            $customfields
         );
+
+        // Without values in the config setting deputyselect makes no sense.
+        if (
+            isset($args['deputyselect'])
+            && !empty($args['deputyselect'])
+            && !empty(get_config('bookingextension_confirmation_supervisor', 'deputy'))
+        ) {
+            if (has_capability('mod/booking:assigndeputies', context_system::instance())) {
+                $data->deputyselect = 1;
+            }
+            $data->deputydisplay = dynamicdeputyselect::get_display_deputies_data();
+        }
+        if (!empty($args['reduced'])) {
+            $data->reduced = 1;
+        }
         /** @var renderer $renderer */
         $renderer = $PAGE->get_renderer('mod_booking');
 
@@ -1562,6 +1612,52 @@ class shortcodes {
             }
         }
         return;
+    }
 
+    /**
+     * Shortcode: Supervisor's team.
+     * Table of the answers with status booked, reserver & on waiting list.
+     *
+     * @param mixed $shortcode
+     * @param mixed $args
+     * @param mixed $content
+     * @param mixed $env
+     * @param mixed $next
+     *
+     * @return string
+     *
+     */
+    public static function supervisorteam($shortcode, $args, $content, $env, $next) {
+
+        global $PAGE;
+        $requiredargs = [];
+        $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
+        if (
+            isset($error['error'])
+            && $error['error'] === 1
+        ) {
+            return $error['message'];
+        }
+        if (!empty($args['reduced'])) {
+            $scope = 'supervisorteamreduced';
+        } else {
+            $scope = 'supervisorteam';
+        }
+        $data = new booked_users(
+            $scope,
+            0,
+            true, // Booked users.
+            true, // Users on waiting list.
+            true, // Reserved answers (e.g. in shopping cart).
+            false, // Users on notify list.
+            false, // Deleted users.
+            false, // Booking history.
+            false // Options to confirm.
+        );
+
+        /** @var renderer $renderer */
+        $renderer = $PAGE->get_renderer('mod_booking');
+
+        return $renderer->render_booked_users($data);
     }
 }

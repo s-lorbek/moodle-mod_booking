@@ -202,6 +202,12 @@ final class competency_test extends advanced_testcase {
 
         $this->assertEquals(false, $option->user_completed_option());
         $option->toggle_user_completion($user2->id);
+
+        // Run all adhoc tasks now.
+        ob_start();
+        $this->runAdhocTasks();
+        $res = ob_get_clean();
+
         $this->assertEquals(true, $option->user_completed_option());
 
         // Get messages.

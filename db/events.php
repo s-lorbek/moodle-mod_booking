@@ -114,4 +114,31 @@ $observers = [
         'eventname' => '\local_shopping_cart\event\item_added',
         'callback' => 'mod_booking_observer::shoppingcart_item_added',
     ],
+    [
+        'eventname' => '\core\event\competency_updated',
+        'callback' => 'mod_booking_observer::competency_updated',
+    ],
+    [
+        'eventname' => '\core\event\competency_deleted',
+        'callback' => 'mod_booking_observer::competency_deleted',
+    ],
+    [
+        'eventname' => '\core\event\competency_user_competency_rated',
+        'callback' => 'mod_booking_observer::competency_user_competency_rated',
+    ],
+    [
+        'eventname' => '\core\event\competency_user_competency_rated_in_plan',
+        'callback' => 'mod_booking_observer::competency_user_competency_rated_in_plan',
+    ],
+    [
+        'eventname' => '\core\event\competency_user_competency_rated_in_course',
+        'callback' => 'mod_booking_observer::competency_user_competency_rated_in_course',
+    ],
 ];
+
+if (class_exists('\local_shopping_cart\event\checkout_completed')) {
+    $observers[] = [
+        'eventname' => '\local_shopping_cart\event\checkout_completed',
+        'callback' => 'mod_booking_observer::checkout_completed',
+    ];
+}

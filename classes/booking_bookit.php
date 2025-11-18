@@ -300,7 +300,7 @@ class booking_bookit {
              Second the reaction code should be included in the condition classes themselves, to improve maintainability. */
             if ($id < MOD_BOOKING_BO_COND_BOOKITBUTTON) {
                 $isavailable = true;
-            } else if ($id === MOD_BOOKING_BO_COND_BOOKITBUTTON || $id === MOD_BOOKING_BO_COND_REBOOKITBUTTON) {
+            } else if ($id === MOD_BOOKING_BO_COND_BOOKITBUTTON) {
                 $cache = cache::make('mod_booking', 'confirmbooking');
                 $cachekey = $userid . "_" . $settings->id . "_bookit";
                 $now = time();
@@ -519,10 +519,16 @@ class booking_bookit {
      * @param int $itemid
      * @param int $status
      * @param int $userid
+     * @param bool $openruleexecution
      * @return array
      */
-    public static function answer_booking_option(string $area, int $itemid, int $status, int $userid = 0): array {
-
+    public static function answer_booking_option(
+        string $area,
+        int $itemid,
+        int $status,
+        int $userid = 0,
+        bool $openruleexecution = false
+    ): array {
         global $PAGE, $USER;
 
         $bookingoption = booking_option::create_option_from_optionid($itemid);
@@ -560,7 +566,7 @@ class booking_bookit {
                 }
                 break;
             case MOD_BOOKING_STATUSPARAM_DELETED:
-                if (!$bookingoption->user_delete_response($user->id)) {
+                if (!$bookingoption->user_delete_response($user->id, false, false, true, false, $openruleexecution)) {
                     return [];
                 }
                 break;

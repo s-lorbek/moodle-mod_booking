@@ -117,7 +117,12 @@ class competencies extends field_base {
         $changes = $instance->check_for_changes($formdata, $instance);
 
         if (!empty($value)) {
-            $stringvalue = implode(',', $value);
+            if (is_array($value)) {
+                $stringvalue = implode(',', $value);
+            } else {
+                // Assuming that this is a correct string (because of importing).
+                $stringvalue = $value;
+            }
             $newoption->$key = $stringvalue;
             $formdata->$key = $stringvalue;
         } else {
@@ -394,9 +399,6 @@ class competencies extends field_base {
             $userevidence = new user_evidence(0, $record);
             $userevidence->create();
 
-            // Also create the event for the evidence.
-            competency_user_evidence_created::create_from_user_evidence($userevidence);
-
             $link = new stdClass();
             $link->userevidenceid = $userevidence->get('id');
             $link->competencyid = $competencyid;
@@ -434,13 +436,16 @@ class competencies extends field_base {
      * @param string $competencies
      * @param booking_option|null $currentoption
      * @param bool $displayall
+     * @param int $userid
      * @return string
      */
     public static function get_list_of_similar_options(
         $competencies,
         $currentoption = null,
-        $displayall = true
+        $displayall = true,
+        $userid = 0
     ): string {
+        global $USER;
         if (
             !get_config('booking', 'usecompetencies')
             || empty($competencies)
@@ -455,6 +460,17 @@ class competencies extends field_base {
         ];
         if ($displayall) {
             $args['all'] = "true";
+        }
+
+        if (
+            !empty($userid)
+            && $USER->id != $userid
+        ) {
+            if (isset($args['exclude'])) {
+                $args['exclude'] .= ',booknow';
+            } else {
+                $args['exclude'] = 'booknow';
+            }
         }
 
         $env = new stdClass();

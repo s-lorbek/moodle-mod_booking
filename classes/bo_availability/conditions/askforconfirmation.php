@@ -113,6 +113,16 @@ class askforconfirmation implements bo_condition {
             !isset($bookinginformation['onwaitinglist'])
             && (
                     (
+                        (
+                            ($bookinginformation['notbooked']['freeonwaitinglist'] ?? 0) == -1
+                        ||
+                            ($bookinginformation['notbooked']['freeonwaitinglist'] ?? 0) > 0
+                        )
+                        && isset($bookinginformation['notbooked']['fullybooked'])
+                        && $bookinginformation['notbooked']['fullybooked'] === true
+                    )
+                ||
+                    (
                         $settings->waitforconfirmation == 1
                         || (
                             !empty($settings->jsonobject->useprice)
@@ -198,7 +208,7 @@ class askforconfirmation implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_BOOK, MOD_BOOKING_BO_BUTTON_MYBUTTON];
     }

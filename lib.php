@@ -95,6 +95,7 @@ define('MOD_BOOKING_STATUSPARAM_RESERVED', 2);
 define('MOD_BOOKING_STATUSPARAM_NOTIFYMELIST', 3); // Get message when place is open.
 define('MOD_BOOKING_STATUSPARAM_NOTBOOKED', 4);
 define('MOD_BOOKING_STATUSPARAM_DELETED', 5);
+define('MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED', 6);
 
 // Values for Booking history.
 define('MOD_BOOKING_STATUSPARAM_BOOKED_DELETED', 10);
@@ -107,6 +108,7 @@ define('MOD_BOOKING_STATUSPARAM_BOOKINGOPTION_MOVED', 16);
 define('MOD_BOOKING_STATUSPARAM_BOOKOTHEROPTIONS', 17);
 define('MOD_BOOKING_STATUSPARAM_COMPLETION_CHANGED', 18);
 define('MOD_BOOKING_STATUSPARAM_NOTES_EDITED', 19);
+define('MOD_BOOKING_STATUSPARAM_CONFIRMATION_DELETED', 20);
 
 // Define booking presence status parameters.
 define('MOD_BOOKING_PRESENCE_STATUS_NOTSET', 0);
@@ -169,6 +171,7 @@ define('MOD_BOOKING_BO_COND_JSON_SELECTUSERS', 14);
 define('MOD_BOOKING_BO_COND_JSON_PREVIOUSLYBOOKED', 13);
 define('MOD_BOOKING_BO_COND_JSON_CUSTOMUSERPROFILEFIELD', 12);
 define('MOD_BOOKING_BO_COND_JSON_USERPROFILEFIELD', 11);
+define('MOD_BOOKING_BO_COND_JSON_HASCOMPETENCY', 10);
 
 define('MOD_BOOKING_BO_COND_INSTANCEAVAILABILITY', 5);
 define('MOD_BOOKING_BO_COND_CAPBOOKINGCHOOSE', 4);
@@ -185,11 +188,9 @@ define('MOD_BOOKING_BO_COND_CONFIRMBOOKWITHCREDITS', -40);
 define('MOD_BOOKING_BO_COND_BOOKWITHCREDITS', -50);
 
 define('MOD_BOOKING_BO_COND_NOSHOPPINGCART', -60);
-define('MOD_BOOKING_BO_COND_PRICEISSETAGAIN', -67); // Rebook an option with price.
 define('MOD_BOOKING_BO_COND_PRICEISSET', -70);
 
 define('MOD_BOOKING_BO_COND_CONFIRMBOOKIT', -80);
-define('MOD_BOOKING_BO_COND_REBOOKITBUTTON', -87); // Rebook an option without price.
 define('MOD_BOOKING_BO_COND_BOOKITBUTTON', -90); // This is only used to show the book it button.
 define('MOD_BOOKING_BO_COND_CONFIRMATION', -100); // This is the last page after booking.
 
@@ -2777,7 +2778,7 @@ register_shutdown_function(function () {
         return;
     }
 
-    // To avoid loops, we need a counter.
+    // To avoid infinite loops, we need a counter.
     $counter = 0;
     $rules = rules_info::$rulestoexecute;
     while (

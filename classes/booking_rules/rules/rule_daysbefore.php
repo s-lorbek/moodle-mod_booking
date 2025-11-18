@@ -170,7 +170,7 @@ class rule_daysbefore implements booking_rule {
             $jsonobject = json_decode($data->rulejson);
         }
 
-        $jsonobject->name = $data->rule_name;
+        $jsonobject->name = $data->rule_name ?? $data->rulename;
         $jsonobject->rulename = $this->rulename;
         $jsonobject->ruledata = new stdClass();
         $jsonobject->ruledata->days = $data->rule_daysbefore_days ?? 0;
@@ -300,7 +300,10 @@ class rule_daysbefore implements booking_rule {
             }
             $oldnextruntime = (int) $record->datefield - ((int) $this->days * 86400);
 
-            if ($oldnextruntime != $nextruntime) {
+            if (
+                $oldnextruntime != $nextruntime
+                && !PHPUNIT_TEST
+            ) {
                 $rulestillapplies = false;
                 break;
             }

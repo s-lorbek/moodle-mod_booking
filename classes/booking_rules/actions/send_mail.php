@@ -16,8 +16,11 @@
 
 namespace mod_booking\booking_rules\actions;
 
+use core_user;
+use dml_missing_record_exception;
 use mod_booking\booking_rules\booking_rule_action;
 use mod_booking\placeholders\placeholders_info;
+use mod_booking\singleton_service;
 use mod_booking\task\send_mail_by_rule_adhoc;
 use MoodleQuickForm;
 use stdClass;
@@ -194,6 +197,19 @@ class send_mail implements booking_rule_action {
     public function execute(stdClass $record) {
         global $DB;
 
+        if (!isset($record->userid)) {
+            return;
+        }
+        // Only execute for active users.
+        try {
+            $user = core_user::get_user($record->userid, '*', MUST_EXIST);
+        } catch (dml_missing_record_exception $e) {
+            return;
+        }
+        if ($user->deleted || $user->suspended) {
+            return;
+        }
+
         $task = new send_mail_by_rule_adhoc();
 
         $taskdata = [
@@ -219,11 +235,29 @@ class send_mail implements booking_rule_action {
         if (!empty($record->optiondateid)) {
             $taskdata['optiondateid'] = $record->optiondateid;
         }
-
+        $user = singleton_service::get_instance_of_user($record->userid);
+        if (!empty($user->suspended)) {
+            return;
+        }
         $task->set_custom_data($taskdata);
         $task->set_userid($record->userid);
 
         $task->set_next_run_time($record->nextruntime);
+
+        $similartask = $DB->get_record('task_adhoc', [
+            'nextruntime' => $record->nextruntime,
+            'userid' => $record->userid,
+            ]);
+
+        if ($similartask && isset($similartask->customdata)) {
+            $oldtaskdata = json_decode($similartask->customdata);
+            unset($oldtaskdata->optiondateid);
+            unset($taskdata['optiondateid']);
+            if ($oldtaskdata == (object)$taskdata) {
+                // A similar task has already been created before, we therefore don't queue the task again.
+                return;
+            }
+        }
 
         // Now queue the task or reschedule it if it already exists (with matching data).
         \core\task\manager::reschedule_or_queue_adhoc_task($task);

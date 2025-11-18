@@ -24,7 +24,7 @@
  */
 
 namespace mod_booking\table;
-use core\exception\moodle_exception;
+use moodle_exception;
 use core_plugin_manager;
 use mod_booking\enrollink;
 use mod_booking\event\bookinganswer_confirmed;
@@ -96,7 +96,46 @@ class manageusers_table extends wunderbyte_table {
         if (empty($values->timemodified)) {
             return '';
         }
-        return userdate($values->timemodified);
+        return date('d.m.Y', $values->timemodified);
+    }
+
+    /**
+     * Return column timebooked.
+     *
+     * @param stdClass $values
+     * @return string
+     */
+    public function col_timebooked(stdClass $values): string {
+        if (empty($values->timebooked)) {
+            return '';
+        }
+        return date('d.m.Y', $values->timemodified);
+    }
+
+     /**
+      * Returns lable of the booking status.
+      * @param \stdClass $values
+      * @return string
+      */
+    public function col_bookingstatus(stdClass $values): string {
+        switch ($values->waitinglist) {
+            case MOD_BOOKING_STATUSPARAM_BOOKED:
+                return get_string('bookingstatusbooked', 'mod_booking');
+            case MOD_BOOKING_STATUSPARAM_WAITINGLIST:
+                return get_string('bookingstatusonwaitinglist', 'mod_booking');
+            case MOD_BOOKING_STATUSPARAM_RESERVED:
+                return get_string('bookingstatusreserved', 'mod_booking');
+            case MOD_BOOKING_STATUSPARAM_NOTIFYMELIST:
+                return get_string('bookingstatusonnotificationlist', 'mod_booking');
+            case MOD_BOOKING_STATUSPARAM_NOTBOOKED:
+                return get_string('notbooked', 'mod_booking');
+            case MOD_BOOKING_STATUSPARAM_DELETED:
+                return get_string('bookingstatusdeleted', 'mod_booking');
+            case MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED:
+                return get_string('bookingstatuspreviouslybooked', 'mod_booking');
+            default:
+                return get_string('notbooked', 'booking');
+        }
     }
 
     /**
@@ -146,7 +185,6 @@ class manageusers_table extends wunderbyte_table {
             'id' => $values->id,
             'firstname' => $values->firstname,
             'lastname' => $values->lastname,
-            'email' => $values->email,
             'status' => get_string('waitinglist', 'mod_booking'),
             'userprofilelink' => $url->out(),
         ];
@@ -312,7 +350,8 @@ class manageusers_table extends wunderbyte_table {
             MOD_BOOKING_STATUSPARAM_WAITINGLIST_CONFIRMED,
             $baid,
             $optionid,
-            $settings->bookingid
+            $settings->bookingid,
+            $userid
         );
 
         // If booking option is booked with a price, we don't book directly but just allow to book.
@@ -672,11 +711,7 @@ class manageusers_table extends wunderbyte_table {
         }
 
         if (
-            (
-                !$ba->is_fully_booked()
-                || !empty($settings->jsonobject->useprice)
-            )
-            && $allowedtoconfirm
+                $allowedtoconfirm
         ) {
             $data[] = [
                 'label' => '', // Name of your action button.

@@ -54,6 +54,7 @@ class optionstoconfirm extends option {
      * @param array $headers
      * @param bool $sortable
      * @param bool $paginate
+     * @param array $customfields
      * @return wunderbyte_table|null
      */
     public function return_users_table(
@@ -64,13 +65,24 @@ class optionstoconfirm extends option {
         array $columns,
         array $headers = [],
         bool $sortable = false,
-        bool $paginate = false
+        bool $paginate = false,
+        array $customfields = []
     ) {
-        [$fields, $from, $where, $params] = $this->return_sql_for_booked_users($scope, $scopeid, $statusparam);
+        [$fields, $from, $where, $params] = $this->return_sql_for_booked_users($scope, $scopeid, $statusparam, $customfields);
 
         $tablename = "{$tablenameprefix}_{$scope}_{$scopeid}";
         $table = new manageusers_table($tablename);
-
+        if (!empty($customfields)) {
+            // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+            /* We need the right readable values for each customfield.
+            $cfheaders = [];
+            $customfieldobjects = booking_handler::get_customfields();
+            foreach ($customfields as $customfield) {
+                $key =
+            } */
+            $columns = array_merge($columns, $customfields);
+            $headers = array_merge($headers, ['x']);
+        }
         $table->define_cache('mod_booking', "bookedusertable");
         $table->define_columns($columns);
         $table->define_headers($headers);
@@ -98,7 +110,6 @@ class optionstoconfirm extends option {
                 $sortablecolumns = [
                     'firstname' => get_string('firstname'),
                     'lastname' => get_string('lastname'),
-                    'email' => get_string('email'),
                     'timemodified' => get_string('timemodified', 'mod_booking'),
                 ];
                 $table->sort_default_column = 'timemodified';
@@ -216,9 +227,10 @@ class optionstoconfirm extends option {
      * @param string $scope option | instance | course | system
      * @param int $scopeid optionid | cmid | courseid | 0
      * @param int $statusparam
+     * @param array $customfields
      * @return array
      */
-    public function return_sql_for_booked_users(string $scope, int $scopeid, int $statusparam): array {
+    public function return_sql_for_booked_users(string $scope, int $scopeid, int $statusparam, array $customfields = []): array {
         global $USER, $DB;
 
         // The where restriction.
@@ -234,7 +246,7 @@ class optionstoconfirm extends option {
                         JOIN {role_assignments} ra ON ra.userid = :userid
                         JOIN {context} ctx_ra ON ctx_ra.id = ra.contextid
                         JOIN {role_capabilities} rc ON rc.roleid = ra.roleid
-                        WHERE bo.id = s1.optionid
+                        WHERE bo.id = optionid
                         AND (ctx_cm.path LIKE $concat OR ctx_cm.id = ctx_ra.id)
                         AND rc.capability = :capability
                         AND rc.permission = 1
@@ -286,7 +298,7 @@ class optionstoconfirm extends option {
             $params['statusparam2'] = $statusparam;
         }
 
-        $whereneedtoconfirm = " AND " . self::get_whereneedtoconfirm_sql($params);
+        $whereneedtoconfirm = " AND " . $this->get_whereneedtoconfirm_sql($params);
         $whereneedtoconfirmjoin = " JOIN {booking_options} bo ON bo.id = ba.optionid
                                     JOIN {course_modules} cm ON bo.bookingid = cm.instance
                                     JOIN {modules} m ON m.id = cm.module AND m.name = 'booking'";
@@ -325,9 +337,12 @@ class optionstoconfirm extends option {
             ) s2
             $orderby
         ) s1";
-
+        if (!empty($customfields)) {
+            [$fields, $from, $where, $params] = $this->join_customfields($fields, $from, $where, $params);
+        }
         return [$fields, $from, $where, $params];
     }
+
 
     /**
      * This function calls the set booking extension and loads corresponding sql.
@@ -437,67 +452,5 @@ class optionstoconfirm extends option {
         } else {
             return has_capability($capability, context_system::instance());
         }
-    }
-
-    /**
-     * Returns the text to be shown as an extra description for the scope.
-     *
-     * This function returns an array of objects. Each object contains the properties:
-     *  - 'text'
-     *  - 'class'
-     *  - 'link'
-     *
-     * Example:
-     * [
-     *     {
-     *         'text': 'any text',
-     *         'class': 'any class',
-     *         'link': 'a valid link or an empty string'
-     *     }
-     * ]
-     *
-     * @param int $statusparam
-     * @return array Array of objects containing 'text', 'class', and 'link' properties.
-     */
-    public function get_additional_texts(int $statusparam): array {
-        // As we are listing a list of answers to be confirmed,
-        // here we return a list of persons who are selected as deputies of the logged-in approver.
-        global $USER;
-
-        // Fetch deputies if the confirmation_supervisor booking extension if available.
-        $classname = "\\bookingextension_confirmation_supervisor\\local\\confirmbooking";
-
-        if (class_exists($classname)) {
-            // Skip if subplugin is disabled.
-            if (!get_config('bookingextension_confirmation_supervisor', 'confirmationsupervisorenabled')) {
-                return [];
-            }
-
-            $deputies = $classname::get_deputies($USER);
-            if (empty($deputies)) {
-                return [];
-            }
-
-            $texts = [];
-            // First line as a description.
-            $text = new \stdClass();
-            $text->text = get_string('deputiesalreadyset', 'mod_booking');
-            $text->class = 'text-warning font-weight-bold';
-            $text->link = '';
-            $texts[] = $text;
-            // Attach each user as a text object.
-            foreach ($deputies as $deputyuserid) {
-                $deputyuserid = (int)$deputyuserid;
-                $deputy = singleton_service::get_instance_of_user($deputyuserid);
-                $text = new \stdClass();
-                $text->text = "{$deputy->firstname} {$deputy->lastname}";
-                $text->class = 'btn btn-primary btn-sm';
-                $text->link = new \moodle_url('/user/profile.php', ['id' => $deputy->id]);
-                $texts[] = $text;
-            }
-            return $texts;
-        }
-
-        return [];
     }
 }

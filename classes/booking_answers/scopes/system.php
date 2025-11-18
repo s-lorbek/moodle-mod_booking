@@ -79,6 +79,7 @@ class system extends scope_base_options {
      * @param array $headers
      * @param bool $sortable
      * @param bool $paginate
+     * @param array $customfields
      * @return wunderbyte_table|null
      */
     public function return_users_table(
@@ -89,7 +90,8 @@ class system extends scope_base_options {
         array $columns,
         array $headers = [],
         bool $sortable = false,
-        bool $paginate = false
+        bool $paginate = false,
+        array $customfields = []
     ) {
         [$fields, $from, $where, $params] = $this->return_sql_for_booked_users($scope, $scopeid, $statusparam);
 

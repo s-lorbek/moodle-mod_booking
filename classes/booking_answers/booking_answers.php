@@ -80,6 +80,9 @@ class booking_answers {
     /** @var array array of all user objects (only those to notify) */
     private $userstonotify = [];
 
+    /** @var array array of all user objects (only previously booked) */
+    private $userspreviouslybooked = [];
+
     /**
      * Constructor for the booking answers class.
      *
@@ -108,6 +111,7 @@ class booking_answers {
             $this->usersreserved = [];
             $this->usersdeleted = [];
             $this->userstonotify = [];
+            $this->userspreviouslybooked = [];
             return;
         }
 
@@ -165,11 +169,7 @@ class booking_answers {
                         $this->usersonwaitinglist[$answer->userid] = $answer;
                         break;
                     case MOD_BOOKING_STATUSPARAM_RESERVED:
-                        if (self::count_places($this->usersonlist) < $this->bookingoptionsettings->maxanswers) {
-                            $this->usersonlist[$answer->userid] = $answer;
-                        } else {
-                            $this->usersonwaitinglist[$answer->userid] = $answer;
-                        }
+                        $this->usersonlist[$answer->userid] = $answer;
                         $this->usersreserved[$answer->userid] = $answer;
                         break;
                     case MOD_BOOKING_STATUSPARAM_DELETED:
@@ -177,6 +177,9 @@ class booking_answers {
                         break;
                     case MOD_BOOKING_STATUSPARAM_NOTIFYMELIST:
                         $this->userstonotify[$answer->userid] = $answer;
+                        break;
+                    case MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED:
+                        $this->userspreviouslybooked[$answer->userid] = $answer;
                         break;
                 }
             }
@@ -189,6 +192,7 @@ class booking_answers {
                 'usersreserved' => $this->get_usersreserved(),
                 'usersdeleted' => $this->usersdeleted,
                 'userstonotify' => $this->userstonotify,
+                'userspreviouslybooked' => $this->userspreviouslybooked,
             ];
             if (!get_config('booking', 'cacheturnoffforbookinganswers')) {
                 $cache->set($optionid, $data);
@@ -201,6 +205,7 @@ class booking_answers {
             $this->usersreserved = $data->usersreserved;
             $this->usersdeleted = $data->usersdeleted;
             $this->userstonotify = $data->userstonotify;
+            $this->userspreviouslybooked = $data->userspreviouslybooked;
         }
     }
 
@@ -286,6 +291,45 @@ class booking_answers {
      */
     public function get_userstonotify(): array {
         return $this->userstonotify;
+    }
+
+    /**
+     * Get all users who are on the notification list.
+     *
+     * Returns an array of user booking answers for users who have requested
+     * to be notified if a place becomes available.
+     *
+     * @return array Array of user records to notify, indexed by user ID.
+     */
+    public function get_userspreviouslybooked(): array {
+        global $DB, $CFG;
+
+        try {
+            if (!empty($this->optionid)) {
+                [$sql, $params] = self::return_sql_to_get_answers(
+                    $this->optionid,
+                    0,
+                    0,
+                    [MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED]
+                );
+
+                $answers = $DB->get_records_sql($sql, $params);
+                foreach ($answers as $answer) {
+                    $answer = customform::append_customform_elements($answer);
+                    $this->userspreviouslybooked[$answer->userid][$answer->baid] = $answer;
+                }
+            } else {
+                $this->userspreviouslybooked = [];
+            }
+        } catch (Throwable $e) {
+            if ($CFG->debug === E_ALL) {
+                throw $e;
+            } else {
+                $this->userspreviouslybooked = [];
+            }
+        }
+
+        return $this->userspreviouslybooked;
     }
 
 
@@ -946,6 +990,24 @@ class booking_answers {
                         = get_string('waitinglistplacesplacesleft', 'mod_booking', $bookinginformation['freeonwaitinglist']);
                 }
             }
+        } else {
+            if (isset($bookinginformation['freeonwaitinglist']) && $bookinginformation['freeonwaitinglist'] == -1) {
+                if (!has_capability('mod/booking:updatebooking', $context) && $waitingplacesinfotexts) {
+                    $bookinginformation['showwaitinglistplacesinfotext'] = true;
+                    if ($waitingplacesinfotexts == '1') {
+                        // Show Still enough places left.
+                        $bookinginformation['waitinglistplacesinfotext'] = get_string('waitinglistenoughmessage', 'mod_booking');
+                    } else {
+                        // Other cases - show unlimited places left.
+                        $bookinginformation['waitinglistplacesinfotext'] = get_string(
+                            'waitinglistplacesplacesleft',
+                            'mod_booking',
+                            get_string('bookingplacesunlimitedmessage', 'mod_booking')
+                        );
+                    }
+                }
+                $bookinginformation['waitinglistplacesclass'] = 'text-success avail';
+            }
         }
     }
 
@@ -1247,6 +1309,7 @@ class booking_answers {
                 ba.completed,
                 ba.status,
                 ba.timemodified,
+                ba.timebooked,
                 ba.bookingid,
                 ba.optionid,
                 ba.timecreated,
@@ -1283,6 +1346,38 @@ class booking_answers {
         global $DB;
 
         [$sql, $params] = self::return_sql_to_get_answers($optionid, $bookingid, $userid, [MOD_BOOKING_STATUSPARAM_BOOKED], true);
+        $records = $DB->get_records_sql($sql, $params);
+        return count($records);
+    }
+
+    /**
+     * This function counts completed booking answers with status booked over all instances.
+     * It does not use the caching we implemented in get_all_answers_for_user_cached, so use with care.
+     *
+     * @param int $userid
+     * @param int $optionid
+     * @param int $bookingid
+     *
+     * @return int
+     *
+     */
+    public static function count_allanswers_of_user(
+        int $userid,
+        int $optionid = 0,
+        int $bookingid = 0
+    ): int {
+        global $DB;
+
+        [$sql, $params] = self::return_sql_to_get_answers(
+            $optionid,
+            $bookingid,
+            $userid,
+            [
+                MOD_BOOKING_STATUSPARAM_BOOKED,
+                MOD_BOOKING_STATUSPARAM_WAITINGLIST,
+                MOD_BOOKING_STATUSPARAM_RESERVED,
+            ]
+        );
         $records = $DB->get_records_sql($sql, $params);
         return count($records);
     }

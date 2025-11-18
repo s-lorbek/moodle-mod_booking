@@ -53,6 +53,7 @@ class option extends scope_base {
      * @param array $headers
      * @param bool $sortable
      * @param bool $paginate
+     * @param array $customfields
      * @return wunderbyte_table|null
      */
     public function return_users_table(
@@ -63,7 +64,8 @@ class option extends scope_base {
         array $columns,
         array $headers = [],
         bool $sortable = false,
-        bool $paginate = false
+        bool $paginate = false,
+        array $customfields = []
     ) {
         [$fields, $from, $where, $params] = $this->return_sql_for_booked_users($scope, $scopeid, $statusparam);
 
@@ -131,6 +133,17 @@ class option extends scope_base {
                     $table->sort_default_column = 'lastname';
                     $table->sort_default_order = SORT_ASC;
                 }
+                break;
+            case MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED:
+                $sortablecolumns = [
+                    'firstname' => get_string('firstname'),
+                    'lastname' => get_string('lastname'),
+                    'email' => get_string('email'),
+                    'timebooked' => get_string('timebooked', 'mod_booking'),
+                ];
+                $table->sort_default_column = 'timebooked';
+                $table->sort_default_order = SORT_DESC;
+
                 break;
             default:
                 $sortablecolumns = [
@@ -231,6 +244,9 @@ class option extends scope_base {
             case MOD_BOOKING_STATUSPARAM_BOOKED_DELETED:
                 $columns['timemodified'] = get_string('timemodified', 'mod_booking');
                 break;
+            case MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED:
+                $columns['timebooked'] = get_string('timebooked', 'mod_booking');
+                break;
         }
 
         return $columns;
@@ -323,6 +339,7 @@ class option extends scope_base {
                     $selectpresencecount
                     ba.timemodified,
                     ba.timecreated,
+                    ba.timebooked,
                     ba.optionid,
                     ba.json,
                     '" . $scope . "' AS scope
@@ -377,29 +394,5 @@ class option extends scope_base {
                 $table->showdownloadbuttonatbottom = true;
             }
         }
-    }
-
-    /**
-     * Returns the text to be shown as an extra description for the scope.
-     *
-     * This function returns an array of objects. Each object contains the properties:
-     *  - 'text'
-     *  - 'class'
-     *  - 'link'
-     *
-     * Example:
-     * [
-     *     {
-     *         'text': 'any text',
-     *         'class': 'any class',
-     *         'link': 'a valid link or an empty string'
-     *     }
-     * ]
-     *
-     * @param int $statusparam
-     * @return array Array of objects containing 'text', 'class', and 'link' properties.
-     */
-    public function get_additional_texts(int $statusparam): array {
-        return [];
     }
 }

@@ -162,7 +162,8 @@ class mod_booking_generator extends testing_module_generator {
         $record = (object) $record;
 
         // Finalizing object with required properties.
-        $record->id = 0;
+        $record->id = $record->id ?? 0;
+        $record->optionid = $record->optionid ?? 0;
         $record->cmid = $booking->cmid;
         $record->identifier = $record->identifier ?? booking_option::create_truly_unique_option_identifier();
 
@@ -386,7 +387,7 @@ class mod_booking_generator extends testing_module_generator {
         $ruleobject->actionname = $ruledraft->actionname;
         $ruleobject->actiondata = json_decode($ruledraft->actiondata);
         $ruleobject->rulename = $ruledraft->rulename;
-        // Compatibility for old tests on tules.
+        // Compatibility for old tests on rules.
         if (!empty($ruledraft->ruledata)) {
             $ruleobject->ruledata = json_decode($ruledraft->ruledata);
             if (empty($ruleobject->ruledata->cancelrules)) {
@@ -418,7 +419,13 @@ class mod_booking_generator extends testing_module_generator {
 
         $record->rulejson = json_encode($ruleobject);
 
-        $record->id = $DB->insert_record('booking_rules', $record);
+        // If we can update, we use id here.
+        if (!empty($ruledraft->id)) {
+            $record->id = $ruledraft->id;
+            $DB->update_record('booking_rules', $record);
+        } else {
+            $record->id = $DB->insert_record('booking_rules', $record);
+        }
 
         return $record;
     }
