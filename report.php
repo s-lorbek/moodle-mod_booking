@@ -330,10 +330,6 @@ $tableallbookings->no_sorting('certificate');
 $tableallbookings->no_sorting('allusercertificates');
 
 if (!$tableallbookings->is_downloading()) {
-    if ($action == 'postcustomreport') {
-        $bookingoption->printcustomreport();
-    }
-
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
         $allselectedusers = [];
 
@@ -1001,7 +997,7 @@ if (!$tableallbookings->is_downloading()) {
     // Button to download signin sheet.
     $actionbuttonstop .=
         '<button class="btn btn-primary btn-sm mr-2" id="downloadsigninsheet-top-btn" buttonaction='
-        . $bookingoption->booking->settings->toporientation . '
+        . $bookingoption->booking->settings->toporientation . '>
             <i class="fa fa-download fa-fw" aria-hidden="true"></i>&nbsp;' .
             get_string('signinsheetdownload', 'mod_booking') .
         '</button>';
@@ -1244,17 +1240,6 @@ if (!$tableallbookings->is_downloading()) {
         ['id' => 'sign_in_sheet_download']
     );
 
-    if (!empty($bookingoption->booking->settings->customtemplateid)) {
-        echo ' | ' . html_writer::link(
-            new moodle_url(
-                '/mod/booking/report.php',
-                ['id' => $cm->id, 'optionid' => $optionid, 'action' => 'postcustomreport']
-            ),
-            get_string('customdownloadreport', 'mod_booking'),
-            ['target' => '_blank']
-        );
-    }
-
     echo "</div>";
 
     echo "<script>
@@ -1274,6 +1259,36 @@ if (!$tableallbookings->is_downloading()) {
         $eventslist->icon = 'fa fa-envelope-o';
         $eventslist->title = get_string('showmessages', 'mod_booking');
         echo $OUTPUT->render_from_template('mod_booking/eventslist', (array) $eventslist);
+    }
+
+    // We call the template render to display how many users are in previously booked list.
+    $data = new booked_users('option', $optionid, false, false, false, false, false, false, false, true);
+    $previouslybooked = $renderer->render_booked_users($data);
+
+    if (!empty($previouslybooked)) {
+        $contents = html_writer::tag(
+            'button',
+            '<i class="fa fa-users" aria-hidden="true"></i>' . get_string('bookingstatuspreviouslybooked', 'mod_booking'),
+            [
+                'data-toggle' => "collapse",
+                'data-target' => "#collapsePreviouslybookedlist",
+                'data-bs-toggle' => "collapse",
+                'data-bs-target' => "#collapsePreviouslybookedlist",
+                'role' => "button",
+                'aria-expanded' => "false",
+                'aria-controls' => "collapsePreviouslybookedlist",
+                'class' => "btn btn-link showrecentupdates-btn",
+            ]
+        );
+        echo html_writer::tag('div', $contents);
+        echo html_writer::tag(
+            'div',
+            $previouslybooked,
+            [
+                'class' => "collapse",
+                'id' => "collapsePreviouslybookedlist",
+            ]
+        );
     }
 
     // We call the template render to display how many users are currently reserved.

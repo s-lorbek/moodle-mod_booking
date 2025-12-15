@@ -2831,11 +2831,11 @@ function xmldb_booking_upgrade($oldversion) {
     }
 
     if ($oldversion < 2020071300) {
-        // Define field autcractive to be added to booking.
+        // Define field customtemplateid to be added to booking.
         $table = new xmldb_table('booking');
         $field = new xmldb_field('customtemplateid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'showviews');
 
-        // Conditionally launch add field autcractive.
+        // Conditionally launch add field customtemplateid.
         if (!$dbman->field_exists($table, $field)) {
             $dbman->add_field($table, $field);
         }
@@ -5061,19 +5061,6 @@ function xmldb_booking_upgrade($oldversion) {
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2025100101, 'booking');
     }
-    if ($oldversion < 2025100201) { // Update the version number to the next one in your sequence.
-        // Define field toporientation to be added to the booking table.
-        $table = new xmldb_table('booking');
-        $field = new xmldb_field('toporientation', XMLDB_TYPE_CHAR, '1', null, XMLDB_NOTNULL, null, 'P', 'defaultsortorder');
-
-        // Conditionally launch add field toporientation.
-        if (!$dbman->field_exists($table, $field)) {
-            $dbman->add_field($table, $field);
-        }
-
-        // Booking savepoint reached.
-        upgrade_mod_savepoint(true, 2025100201, 'booking'); // Update to your new version number.
-    }
 
     if ($oldversion < 2025102000) {
         // Define field pricecategory to be added to booking_answers.
@@ -5087,6 +5074,53 @@ function xmldb_booking_upgrade($oldversion) {
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2025102000, 'booking');
+    }
+
+    if ($oldversion < 2025111701) {
+        // Define table booking_customreport to be dropped.
+        $tablecustomreport = new xmldb_table('booking_customreport');
+
+        // Conditionally launch drop table for booking_customreport.
+        if ($dbman->table_exists($tablecustomreport)) {
+            $dbman->drop_table($tablecustomreport);
+        }
+
+        // Define field customtemplateid to be dropped from booking.
+        $tablebooking = new xmldb_table('booking');
+
+        $customtemplateid = new xmldb_field('customtemplateid', XMLDB_TYPE_INTEGER, '10');
+        // Conditionally drop field customtemplateid.
+        if ($dbman->field_exists($tablebooking, $customtemplateid)) {
+            $dbman->drop_field($tablebooking, $customtemplateid);
+        }
+
+        // If the old field containing the typo is still there, we drop it too.
+        $customteplateid = new xmldb_field('customteplateid', XMLDB_TYPE_INTEGER, '10');
+        // Conditionally drop field customteplateid.
+        if ($dbman->field_exists($tablebooking, $customteplateid)) {
+            $dbman->drop_field($tablebooking, $customteplateid);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025111701, 'booking');
+    }
+
+    if ($oldversion < 2025112500) {
+        // Define field toporientation to be added to the booking table.
+        $table = new xmldb_table('booking');
+        $field = new xmldb_field('toporientation', XMLDB_TYPE_CHAR, '1', null, XMLDB_NOTNULL, null, 'P', 'defaultsortorder');
+
+        // Conditionally launch add field toporientation.
+        if (!$dbman->field_exists($table, $field)) {
+            // Add field if it does not exist.
+            $dbman->add_field($table, $field);
+        } else {
+            // If it does exist, make sure it has a length of 1.
+            $dbman->change_field_precision($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025112500, 'booking'); // Update to your new version number.
     }
 
     return true;

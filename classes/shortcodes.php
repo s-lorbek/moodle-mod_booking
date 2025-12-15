@@ -31,9 +31,11 @@ use context_module;
 use context_system;
 use Exception;
 use html_writer;
+use local_wunderbyte_table\filters\types\customfieldfilter;
 use local_wunderbyte_table\filters\types\datepicker;
 use local_wunderbyte_table\filters\types\intrange;
 use local_wunderbyte_table\filters\types\standardfilter;
+use local_wunderbyte_table\local\helper\actforuser;
 use local_wunderbyte_table\wunderbyte_table;
 use mod_booking\booking;
 use mod_booking\form\dynamicdeputyselect;
@@ -73,6 +75,10 @@ class shortcodes {
     public static function recommendedin($shortcode, $args, $content, $env, $next) {
 
         global $PAGE, $CFG;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if ($error['error'] === 1) {
@@ -82,19 +88,7 @@ class shortcodes {
         $course = $PAGE->course;
         $perpage = self::check_perpage($args);
         $pageurl = $course->shortname . $PAGE->url->out();
-        $table = self::init_table_for_courses(null, md5($pageurl));
-
-        $additionalwhere = " (recommendedin = '$course->shortname'
-                            OR recommendedin LIKE '$course->shortname,%'
-                            OR recommendedin LIKE '%,$course->shortname'
-                            OR recommendedin LIKE '%,$course->shortname,%') ";
-
-        [$fields, $from, $where, $params, $filter] =
-                booking::get_options_filter_sql(0, 0, '', null, null, [], [], null, [], $additionalwhere);
-
-        self::applyallarg($args, $where);
-
-        $table->set_filter_sql($fields, $from, $where, $filter, $params);
+        $table = self::init_table_for_courses(null, md5($pageurl), $args);
 
         // These are all possible options to be displayed in the bookingtable.
         $possibleoptions = [
@@ -136,12 +130,41 @@ class shortcodes {
             $showsearch,
             $showsort,
             false,
+            true,
+            MOD_BOOKING_VIEW_PARAM_LIST,
+            0,
+            $args
         );
 
         // If "rightside" is in the "exclude" array, then we do not show the rightside area (containing the "Book now" button).
         if (!empty($exclude) && in_array('rightside', $exclude)) {
             unset($table->subcolumns['rightside']);
         }
+
+        $additionalwhere = " (recommendedin = '$course->shortname'
+                            OR recommendedin LIKE '$course->shortname,%'
+                            OR recommendedin LIKE '%,$course->shortname'
+                            OR recommendedin LIKE '%,$course->shortname,%') ";
+
+        [$fields, $from, $where, $params, $filter] =
+                booking::get_options_filter_sql(
+                    0,
+                    0,
+                    '',
+                    null,
+                    null,
+                    [],
+                    [],
+                    null,
+                    [],
+                    $additionalwhere,
+                    '',
+                    $table
+                );
+
+        self::applyallarg($args, $where);
+
+        $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
         try {
             $out = $table->outhtml($perpage, true);
@@ -171,6 +194,10 @@ class shortcodes {
     public static function courselist($shortcode, $args, $content, $env, $next) {
 
         global $PAGE, $CFG;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = ['cmid'];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if ($error['error'] === 1) {
@@ -192,7 +219,7 @@ class shortcodes {
             return get_string('definecmidforshortcode', 'mod_booking');
         }
 
-        $table = self::init_table_for_courses(null, md5($pageurl));
+        $table = self::init_table_for_courses(null, md5($pageurl), $args);
 
         $wherearray['bookingid'] = (int)$booking->id;
 
@@ -200,24 +227,6 @@ class shortcodes {
         // Additional where condition for both card and list views.
         $foo = [];
         $additionalwhere = self::set_customfield_wherearray($args, $wherearray, $foo, $columnfilters) ?? '';
-
-        [$fields, $from, $where, $params, $filter] =
-                booking::get_options_filter_sql(
-                    0,
-                    0,
-                    '',
-                    null,
-                    null,
-                    [],
-                    $wherearray,
-                    null,
-                    [MOD_BOOKING_STATUSPARAM_BOOKED],
-                    $additionalwhere
-                );
-
-        self::applyallarg($args, $where);
-
-        $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
         // These are all possible options to be displayed in the bookingtable.
         $possibleoptions = [
@@ -262,7 +271,9 @@ class shortcodes {
             $showsort,
             false,
             $inactivefilter,
-            $viewparam
+            $viewparam,
+            0,
+            $args
         );
 
         // Possibility to add customfieldfilter.
@@ -290,6 +301,26 @@ class shortcodes {
             unset($table->subcolumns['rightside']);
         }
 
+        [$fields, $from, $where, $params, $filter] =
+                booking::get_options_filter_sql(
+                    0,
+                    0,
+                    '',
+                    null,
+                    null,
+                    [],
+                    $wherearray,
+                    null,
+                    [MOD_BOOKING_STATUSPARAM_BOOKED],
+                    $additionalwhere,
+                    "",
+                    $table
+                );
+
+        self::applyallarg($args, $where);
+
+        $table->set_filter_sql($fields, $from, $where, $filter, $params);
+
         try {
             $out = $table->outhtml($perpage, true);
         } catch (Throwable $e) {
@@ -312,7 +343,7 @@ class shortcodes {
      * @return void
      *
      */
-    private static function apply_customfieldfilter(&$table, $args) {
+    public static function apply_customfieldfilter(&$table, $args) {
         if (empty($args)) {
             return;
         }
@@ -328,8 +359,9 @@ class shortcodes {
                 continue;
             }
             // Check for multi fields, explode values as settings for standardfilter.
-            $standardfilter = new standardfilter($customfield->shortname, format_string($customfield->name));
-            $table->add_filter($standardfilter);
+            $customfieldfilter = new customfieldfilter($customfield->shortname, format_string($customfield->name));
+            $customfieldfilter->set_sql_for_fieldid($customfield->id);
+            $table->add_filter($customfieldfilter);
         }
     }
 
@@ -344,7 +376,7 @@ class shortcodes {
      * @return array
      *
      */
-    private static function get_columnfilters($args, $verify = true): array {
+    public static function get_columnfilters($args, $verify = true): array {
         if (empty($args)) {
             return [];
         }
@@ -398,6 +430,10 @@ class shortcodes {
     public static function fieldofstudyoptions($shortcode, $args, $content, $env, $next) {
 
         global $COURSE, $USER, $DB, $CFG;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if (($error['error'] === 1)) {
@@ -443,12 +479,7 @@ class shortcodes {
         // Second: Get the courses that are affected.
         // Third: Create the json to obtain the booking options.
 
-        $table = self::init_table_for_courses(null, "courses_" . implode("_", $courseids));
-
-        [$fields, $from, $where, $params, $filter] =
-                booking::get_options_filter_sql(0, 0, '', null, null, [], ['recommendedin' => $courseshortnames], null, [], '');
-
-        $table->set_filter_sql($fields, $from, $where, $filter, $params);
+        $table = self::init_table_for_courses(null, "courses_" . implode("_", $courseids), $args);
 
         // These are all possible options to be displayed in the bookingtable.
         $possibleoptions = [
@@ -476,7 +507,18 @@ class shortcodes {
             $optionsfields = $possibleoptions;
         }
 
-        view::apply_standard_params_for_bookingtable($table, $optionsfields, true, true, true);
+        view::apply_standard_params_for_bookingtable(
+            $table,
+            $optionsfields,
+            true,
+            true,
+            true,
+            true,
+            true,
+            MOD_BOOKING_VIEW_PARAM_LIST,
+            0,
+            $args
+        );
 
         // Set common table options requirelogin, sortorder, sortby.
         self::set_common_table_options_from_arguments($table, $args);
@@ -485,6 +527,11 @@ class shortcodes {
         if (!empty($exclude) && in_array('rightside', $exclude)) {
             unset($table->subcolumns['rightside']);
         }
+
+        [$fields, $from, $where, $params, $filter] =
+                booking::get_options_filter_sql(0, 0, '', null, null, [], ['recommendedin' => $courseshortnames], null, [], '');
+
+        $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
         $table->sort_default_column = 'coursestarttime';
         $table->sort_default_order = SORT_ASC;
@@ -514,7 +561,11 @@ class shortcodes {
      */
     public static function linkbacktocourse($shortcode, $args, $content, $env, $next) {
 
-        global $COURSE, $USER, $DB, $CFG, $PAGE;
+        global $COURSE, $USER, $DB, $PAGE;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if ($error['error'] === 1) {
@@ -577,6 +628,10 @@ class shortcodes {
      */
     public static function allbookingoptions($shortcode, $args, $content, $env, $next) {
         global $PAGE, $DB, $CFG;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $operator = 'AND';
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
@@ -591,7 +646,7 @@ class shortcodes {
         $viewparam = self::get_viewparam($args);
         $wherearray = [];
 
-        $table = self::init_table_for_courses(null, md5($pageurl));
+        $table = self::init_table_for_courses(null, md5($pageurl), $args);
         $additionalparams = [];
 
         // Additional where condition for both card and list views.
@@ -636,31 +691,6 @@ class shortcodes {
             $additionalwhere = ''; // Or null, or '1=1', depending on how your SQL logic handles empty conditions.
         }
 
-        [$fields, $from, $where, $params, $filter] =
-                booking::get_options_filter_sql(
-                    0,
-                    0,
-                    '',
-                    null,
-                    null,
-                    [],
-                    $wherearray,
-                    null,
-                    [MOD_BOOKING_STATUSPARAM_BOOKED],
-                    $additionalwhere,
-                    ""
-                );
-
-                $params = array_merge($tempparams, $params);
-        self::applyallarg($args, $where);
-
-        if (!empty($additionalparams)) {
-            foreach ($additionalparams as $key => $value) {
-                $params[$key] = $value;
-            }
-        }
-        $table->set_filter_sql($fields, $from, $where, $filter, $params);
-
         // These are all possible options to be displayed in the bookingtable.
         $possibleoptions = [
             "description",
@@ -704,7 +734,9 @@ class shortcodes {
             $showsort,
             false,
             $inactivefilter,
-            $viewparam
+            $viewparam,
+            0,
+            $args
         );
 
         // Possibility to add customfieldfilter.
@@ -712,6 +744,37 @@ class shortcodes {
         if (!empty($customfieldfilter)) {
             self::apply_customfieldfilter($table, $customfieldfilter);
         }
+
+        // If "rightside" is in the "exclude" array, then we do not show the rightside area (containing the "Book now" button).
+        if (!empty($exclude) && in_array('rightside', $exclude)) {
+            unset($table->subcolumns['rightside']);
+        }
+
+        [$fields, $from, $where, $params, $filter] =
+                booking::get_options_filter_sql(
+                    0,
+                    0,
+                    '',
+                    null,
+                    null,
+                    [],
+                    $wherearray,
+                    null,
+                    [MOD_BOOKING_STATUSPARAM_BOOKED],
+                    $additionalwhere,
+                    "",
+                    $table
+                );
+
+        $params = array_merge($tempparams, $params);
+        self::applyallarg($args, $where);
+
+        if (!empty($additionalparams)) {
+            foreach ($additionalparams as $key => $value) {
+                $params[$key] = $value;
+            }
+        }
+        $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
         $table->showcountlabel = $showfilter ? true : false;
 
@@ -725,11 +788,6 @@ class shortcodes {
             $table->showfilterontop = true;
         } else {
             $table->showfilterontop = false;
-        }
-
-        // If "rightside" is in the "exclude" array, then we do not show the rightside area (containing the "Book now" button).
-        if (!empty($exclude) && in_array('rightside', $exclude)) {
-            unset($table->subcolumns['rightside']);
         }
 
         try {
@@ -758,6 +816,10 @@ class shortcodes {
      */
     public static function mycourselist($shortcode, $args, $content, $env, $next) {
         global $USER, $PAGE, $CFG;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if ($error['error'] === 1) {
@@ -769,7 +831,6 @@ class shortcodes {
         } else {
             $userid = $USER->id;
         }
-        self::fix_args($args);
         $wherearray = [];
         $course = $PAGE->course;
         $perpage = self::check_perpage($args);
@@ -782,7 +843,7 @@ class shortcodes {
         }
 
         $viewparam = self::get_viewparam($args);
-        $table = self::init_table_for_courses(null, md5($pageurl));
+        $table = self::init_table_for_courses(null, md5($pageurl), $args);
 
         // Additional where condition for both card and list views.
         $additionalwhere = self::set_customfield_wherearray($args, $wherearray) ?? '';
@@ -852,6 +913,8 @@ class shortcodes {
             false,
             true,
             $viewparam,
+            0,
+            $args
         );
 
         // Possibility to add customfieldfilter.
@@ -860,7 +923,7 @@ class shortcodes {
             self::apply_customfieldfilter($table, $customfieldfilter);
         }
 
-                $table->showcountlabel = $showfilter ? true : false;
+        $table->showcountlabel = $showfilter ? true : false;
 
         if (
             isset($args['filterontop'])
@@ -876,6 +939,24 @@ class shortcodes {
 
         // Set common table options requirelogin, sortorder, sortby.
         self::set_common_table_options_from_arguments($table, $args);
+
+        [$fields, $from, $where, $params, $filter] =
+                booking::get_options_filter_sql(
+                    0,
+                    0,
+                    '',
+                    null,
+                    null,
+                    [],
+                    $wherearray,
+                    $userid,
+                    $statusarray,
+                    $additionalwhere,
+                    '',
+                    $table
+                );
+
+        $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
         $table->define_cache('mod_booking', 'mybookingoptionstable');
 
@@ -913,6 +994,10 @@ class shortcodes {
     public static function fieldofstudycohortoptions($shortcode, $args, $content, $env, $next) {
 
         global $PAGE, $USER, $DB, $CFG;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if ($error['error'] === 1) {
@@ -963,26 +1048,9 @@ class shortcodes {
         // Second: Get the courses that are affected.
         // Third: Create the json to obtain the booking options.
 
-        $table = self::init_table_for_courses(null, "courses_" . implode("_", $courses));
+        $table = self::init_table_for_courses(null, "courses_" . implode("_", $courses), $args);
 
         $innerfrom = booking::get_sql_for_fieldofstudy(get_class($DB), $courses);
-
-        [$fields, $from, $where, $params, $filter] =
-                booking::get_options_filter_sql(
-                    0,
-                    0,
-                    '',
-                    null,
-                    null,
-                    [],
-                    [],
-                    null,
-                    [MOD_BOOKING_STATUSPARAM_BOOKED],
-                    '',
-                    $innerfrom
-                );
-
-        $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
         // These are all possible options to be displayed in the bookingtable.
         $possibleoptions = [
@@ -1009,12 +1077,40 @@ class shortcodes {
             $optionsfields = $possibleoptions;
         }
 
-        view::apply_standard_params_for_bookingtable($table, $optionsfields, true, true, true);
+        view::apply_standard_params_for_bookingtable(
+            $table,
+            $optionsfields,
+            true,
+            true,
+            true,
+            true,
+            true,
+            MOD_BOOKING_VIEW_PARAM_LIST,
+            0,
+            $args
+        );
 
         // Set common table options requirelogin, sortorder, sortby.
         self::set_common_table_options_from_arguments($table, $args);
 
         unset($table->subcolumns['rightside']);
+
+        [$fields, $from, $where, $params, $filter] =
+                booking::get_options_filter_sql(
+                    0,
+                    0,
+                    '',
+                    null,
+                    null,
+                    [],
+                    [],
+                    null,
+                    [MOD_BOOKING_STATUSPARAM_BOOKED],
+                    '',
+                    $innerfrom
+                );
+
+        $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
         try {
             $out = $table->outhtml($perpage, true);
@@ -1041,7 +1137,11 @@ class shortcodes {
      */
     public static function bulkoperations($shortcode, $args, $content, $env, $next): string {
 
-        global $PAGE, $CFG;
+        global $CFG;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if ($error['error'] === 1) {
@@ -1109,7 +1209,20 @@ class shortcodes {
         $context = context_system::instance();
         // Templates are excluded here.
         [$fields, $from, $where, $params, $filter] =
-            booking::get_options_filter_sql(0, 0, '', null, $context, [], [], null, [], ' bookingid > 0');
+            booking::get_options_filter_sql(
+                0,
+                0,
+                '',
+                null,
+                $context,
+                [],
+                [],
+                null,
+                [],
+                ' bookingid > 0',
+                '',
+                $table
+            );
 
         $table->set_filter_sql($fields, $from, $where, $filter, $params);
 
@@ -1168,7 +1281,7 @@ class shortcodes {
      * @return array
      *
      */
-    private static function apply_bulkoperations_filter(wunderbyte_table &$table, array $columns, array $args) {
+    public static function apply_bulkoperations_filter(wunderbyte_table &$table, array $columns, array $args) {
 
         // Add defined intrange filter. You might need to purge your caches to make this work.
         if (isset($args['intrangefilter'])) {
@@ -1220,16 +1333,31 @@ class shortcodes {
                 }
             }
         }
+
+        $dcfshortnamesarray = [];
+        $definedcustomfields = booking_handler::get_customfields();
+        foreach ($definedcustomfields as $dcf) {
+            $dcfshortnamesarray[$dcf->shortname] = $dcf->id;
+        }
+        $dcfshortnames = array_column($definedcustomfields, 'shortname');
+        // Defined custom fields shortnames.
         foreach ($filtercolumns as $colname => $localized) {
-            $standardfilter = new standardfilter($colname, $localized);
-            if ($colname === 'invisible') {
-                $standardfilter->add_options([
-                "0" => get_string('optionvisible', 'mod_booking'),
-                "1" => get_string('optioninvisible', 'mod_booking'),
-                "2" => get_string('optionvisibledirectlink', 'mod_booking'),
-                ]);
+            // If the $colname is a customfiled, we need to use customfiledfilter.
+            if (in_array($colname, $dcfshortnames)) {
+                $customfieldfilter = new customfieldfilter($colname, $localized);
+                $customfieldfilter->set_sql_for_fieldid($dcfshortnamesarray[$colname]);
+                $table->add_filter($customfieldfilter);
+            } else {
+                $standardfilter = new standardfilter($colname, $localized);
+                if ($colname === 'invisible') {
+                    $standardfilter->add_options([
+                    "0" => get_string('optionvisible', 'mod_booking'),
+                    "1" => get_string('optioninvisible', 'mod_booking'),
+                    "2" => get_string('optionvisibledirectlink', 'mod_booking'),
+                    ]);
+                }
+                $table->add_filter($standardfilter);
             }
-            $table->add_filter($standardfilter);
         }
 
         self::apply_bookinginstance_filter($table);
@@ -1238,6 +1366,7 @@ class shortcodes {
         if (!empty($customfieldfilter)) {
             self::apply_customfieldfilter($table, $customfieldfilter);
         }
+
         return $filtercolumns;
     }
     /**
@@ -1245,13 +1374,41 @@ class shortcodes {
      *
      * @param ?booking $booking
      * @param ?string $uniquetablename
+     * @param array $args
      * @return bookingoptions_wbtable
      */
-    private static function init_table_for_courses(?booking $booking = null, ?string $uniquetablename = null) {
+    public static function init_table_for_courses(
+        ?booking $booking = null,
+        ?string $uniquetablename = null,
+        array $args = []
+    ) {
+        if ($booking && !empty($booking->cmid)) {
+            $context = context_module::instance($booking->cmid);
+        } else {
+            $context = context_system::instance();
+        }
+        // Important security check.
+        // The user must have the cashier capability to fetch data of other users.
+        if (
+            class_exists('local_shopping_cart\shopping_cart')
+            && has_capability('local/shopping_cart:cashier', context_system::instance())
+            // This check actually corresponds to the check in booking_bookit currently line 126.
+            // It allows overriding a blocking condition under some circumstances.
+            || has_capability('mod/booking:bookforothers', $context)
+        ) {
+            // Check if rendering is for another user id.
+            $userid = actforuser::get_foruserid($args, 0);
+        } else {
+            $userid = 0;
+        }
 
         $tablename = $uniquetablename ?? bin2hex(random_bytes(12));
+        // This is required to differentiate between instances when the table is rendered for a specific user.
+        // The cashier page is an example where the cashier may render the table from another user's perspective.
+        // If no user is specified, $userid will be 0.
+        $tablename .= $userid;
 
-        $table = new bookingoptions_wbtable($tablename);
+        $table = new bookingoptions_wbtable($tablename, $userid);
 
         // Without defining sorting won't work!
         // phpcs:ignore
@@ -1267,7 +1424,7 @@ class shortcodes {
      * @return void
      *
      */
-    private static function apply_bookinginstance_filter(&$table) {
+    public static function apply_bookinginstance_filter(&$table) {
         $bookinginstances = singleton_service::get_all_booking_instances();
 
         $filterarray = [];
@@ -1287,7 +1444,6 @@ class shortcodes {
      * @param array $args
      *
      * @return void
-     *
      */
     public static function set_common_table_options_from_arguments(&$table, $args): void {
         $defaultorder = SORT_ASC; // Default.
@@ -1308,6 +1464,26 @@ class shortcodes {
         }
         if (isset($args['requirelogin']) && $args['requirelogin'] == "false") {
             $table->requirelogin = false;
+        }
+        // Show count label by default. Only hide it when it is turned off explicitly.
+        if (!isset($args['countlabel'])) {
+            $table->showcountlabel = true;
+        } else if ($args['countlabel'] === 'false' || $args['countlabel'] === '0') {
+            $table->showcountlabel = false;
+        } else {
+            $table->showcountlabel = true;
+        }
+        if (isset($args['progress'])) {
+            $table->add_subcolumns('progress', ['progress']);
+        } 
+
+        if (!isset($args['perpage']) || $args['perpage'] == 0 || $args['perpage'] == "false" || $args['perpage'] == false) {
+            $infinitescrollpage = is_numeric($args['infinitescrollpage'] ?? '') ? (int)$args['infinitescrollpage'] : 30;
+            // This allows us to use infinite scrolling, No pages will be used.
+            $table->infinitescroll = $infinitescrollpage;
+            $table->pageable(false);
+        } else {
+            $table->pageable(true);
         }
     }
     /**
@@ -1338,7 +1514,7 @@ class shortcodes {
      * @param array $columnfilters
      * @return string
      */
-    private static function set_customfield_wherearray(
+    public static function set_customfield_wherearray(
         array &$args,
         array &$wherearray,
         array &$tempparamsarray = [],
@@ -1426,7 +1602,7 @@ class shortcodes {
      * @return string
      *
      */
-    private static function set_cmid_wherearray(
+    public static function set_cmid_wherearray(
         array &$args,
         array &$wherearray,
         array &$params = [],
@@ -1472,7 +1648,7 @@ class shortcodes {
      *
      * @return void
      */
-    private static function fix_args(array &$args): void {
+    public static function fix_args(array &$args): void {
         foreach ($args as $key => &$value) {
             // Get rid of quotation marks.
             $value = str_replace('"', '', $value);
@@ -1488,7 +1664,7 @@ class shortcodes {
      * @return int $viewparam if no viewparam is found, the default is MOD_BOOKING_VIEW_PARAM_LIST
      *
      */
-    private static function get_viewparam($args) {
+    public static function get_viewparam($args) {
         // Default is list.
         $viewparam = MOD_BOOKING_VIEW_PARAM_LIST;
         if (!isset($args['type'])) {
@@ -1530,6 +1706,10 @@ class shortcodes {
         global $PAGE;
 
         $requiredargs = [];
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if (
             isset($error['error'])
@@ -1594,10 +1774,10 @@ class shortcodes {
      * @return void
      *
      */
-    private static function applyallarg($args, &$where) {
+    public static function applyallarg($args, &$where) {
+        $startoftoday = strtotime('today'); // Will be 00:00:00 of the current day.
+        $selflearncoursesetting = get_config('booking', 'selflearningcoursedisplayinshortcode');
         if (empty($args['all']) || $args['all'] == "false" || $args['all'] == "0") {
-            $startoftoday = strtotime('today'); // Will be 00:00:00 of the current day.
-            $selflearncoursesetting = get_config('booking', 'selflearningcoursedisplayinshortcode');
             switch ($selflearncoursesetting) {
                 case "0":
                     $where .= " AND (courseendtime > $startoftoday AND courseendtime <> coursestarttime) ";
@@ -1608,6 +1788,19 @@ class shortcodes {
                     break;
                 case "2":
                     $where .= " AND (courseendtime > $startoftoday OR courseendtime = coursestarttime)";
+                    break;
+            }
+        } else if (isset($args['all']) && $args['all'] == 'past') {
+            switch ($selflearncoursesetting) {
+                case "0":
+                    $where .= " AND (courseendtime < $startoftoday AND courseendtime <> coursestarttime) ";
+                    break;
+                case false:
+                case "1":
+                    $where .= " AND courseendtime < $startoftoday ";
+                    break;
+                case "2":
+                    $where .= " AND (courseendtime < $startoftoday OR courseendtime = coursestarttime)";
                     break;
             }
         }
@@ -1628,8 +1821,11 @@ class shortcodes {
      *
      */
     public static function supervisorteam($shortcode, $args, $content, $env, $next) {
-
         global $PAGE;
+
+        // Get rid of quotation marks.
+        self::fix_args($args);
+
         $requiredargs = [];
         $error = shortcodes_handler::validatecondition($shortcode, $args, true, $requiredargs);
         if (

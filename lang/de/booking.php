@@ -47,7 +47,7 @@ $string['addcategory'] = 'Kategorien bearbeiten';
 $string['addcomment'] = 'Kommentar hinzufügen...';
 $string['addcustomfieldorcomment'] = 'Kommentar oder benutzerdefiniertes Feld hinzufügen';
 $string['adddatebutton'] = "Füge Datum hinzu";
-$string['adddeputies'] = "Stellvertrer/innen anpassen";
+$string['adddeputies'] = "Stellvertreter/innen anpassen";
 $string['addedrecords'] = '{$a} Eintrag/Einträge hinzugefügt.';
 $string['addholiday'] = 'Ferien(tag) hinzufügen';
 $string['additionalpricecategories'] = 'Preiskategorien hinzufügen oder bearbeiten';
@@ -129,6 +129,7 @@ $string['approvalsettings_desc'] = "Booking unterstützt verschiedene Bestätigu
 $string['approvalworkflows'] = 'Bestätigungsworkflows';
 $string['approvalworkflows_desc'] = 'Wählen Sie einen oder mehrere Bestätigungsworkflows aus. In den Buchungsoptionen können je nach Auswahl die genauen Verhalten eingestellt werden.';
 $string['areyousure:book'] = 'Nochmal klicken, um die Buchung zu bestätigen';
+$string['areyousure:bookconfirmation'] = 'Nochmal klicken, um die Buchung auf Warteliste zu bestätigen';
 $string['areyousure:cancel'] = 'Nochmal klicken, um die Buchung zu stornieren';
 $string['asglobaltemplate'] = 'Als globale Vorlage hinzufügen';
 $string['askforconfirmationheader'] = '<i class="fa fa-fw fa-lock" aria-hidden="true"></i>&nbsp;Buchen nur nach Bestätigung';
@@ -552,6 +553,7 @@ $string['bookingoptionsall'] = 'Shortcode um alle Buchungsoptionen anzuzeigen.';
 $string['bookingoptionsfromtemplatemenu'] = 'Neue Buchungsoption aus Vorlage erstellen';
 $string['bookingoptionsmenu'] = 'Buchungsoptionen';
 $string['bookingoptiontitle'] = 'Bezeichnung der Buchungsoption';
+$string['bookingoptionuncompleted'] = 'Abschluss der Buchungsoption rückgängig gemacht';
 $string['bookingoptionupdated'] = 'Buchungsoption aktualisiert';
 $string['bookingoptionupdateddesc'] = 'NutzerIn mit ID "{$a->userid}" hat Buchungsoption "{$a->objectid}" aktualisiert.';
 $string['bookingoptionwaitinglistbooked'] = 'Auf Warteliste gebucht';
@@ -690,9 +692,9 @@ $string['cacheturnoffforbookinganswers'] = 'Caching der Antworten (der Buchungen
 $string['cacheturnoffforbookinganswers_desc'] = 'Die Last auf die Datenbank wird durch diese Einstellung massiv erhöht. Bei schweren Problemen mit der Cache Kofiguration kann diese Einstellung dennoch vorteilhaft sein.';
 $string['cacheturnoffforbookingsettings'] = 'Caching der Einstellungen der Buchungsoptionen abschalten';
 $string['cacheturnoffforbookingsettings_desc'] = 'Die Last auf die Datenbank wird durch diese Einstellung massiv erhöht. Bei schweren Problemen mit der Cache Kofiguration kann diese Einstellung dennoch vorteilhaft sein.';
-$string['caladdascourseevent'] = 'Zum Kalender hinzufügen (nur für Kursteilnehmer:innen sichtbar)';
+$string['caladdascourseevent'] = 'Zum Kalender hinzufügen (nur für Teilnehmer:innen des Moodle-Kurses sichtbar)';
 $string['caladdassiteevent'] = 'Zum Kalender hinzufügen (für alle Nutzer:innen sichtbar)';
-$string['caldonotadd'] = 'Nicht zum Kurs-Kalender hinzufügen';
+$string['caldonotadd'] = 'Nicht zum Kalender des Moodle-Kurses hinzufügen';
 $string['caleventtype'] = 'Kalenderereignis ist sichtbar für';
 $string['callbackfunctionnotapplied'] = 'Callback Funktion konnte nicht angewandt werden.';
 $string['callbackfunctionnotdefined'] = 'Callback Funktion nicht definiert.';
@@ -850,6 +852,7 @@ $string['completionchangedhistory'] = 'Der Abschluss wurde von "{$a->completiono
 $string['completionmodule'] = 'Aktiviere Massenlöschung von getätigten Buchungen basierend auf den Aktivitätsabschluss einer Kursaktivität';
 $string['completionmodule_help'] = 'Button zum Löschen aller Buchungen anzeigen, wenn eine andere Kursaktivität abgeschlossen wurde. Die Buchungen von Nutzer:innen werden mit einem Klick auf einen Button auf der Berichtsseite gelöscht! Nur Aktivitäten mit aktiviertem Abschluss können aus der Liste ausgewählt werden.';
 $string['completionoptioncompletedcminfo'] = 'In mind. {$a} Buchungsoptionen auf "Abgeschlossen" gesetzt werden (von Trainer:in, Kursersteller:in oder Manager:in).';
+$string['conditionselectresponsiblecontactinbo_desc'] = 'Kontaktperson(en) der von der Regel betroffenen Buchungsoption wählen.';
 $string['conditionselectstudentinbo_desc'] = 'Nutzer:innen der von der Regel betroffenen Buchungsoption wählen.';
 $string['conditionselectstudentinboroles'] = 'Rolle wählen';
 $string['conditionselectteacherinbo_desc'] = 'Trainer:innen der von der Regel betroffenen Buchungsoption wählen.';
@@ -944,9 +947,9 @@ $string['credits'] = 'Credits';
 $string['credits_help'] = 'Wie viele credits werden bei der Buchung dieser Option verbraucht';
 $string['creditsmessage'] = 'Noch {$a->creditsleft} von insgesamt {$a->maxcredits} Credits verfügbar.';
 $string['csvfile'] = 'CSV Datei';
+$string['currentcategory'] = 'Kurskategorie der Buchungsoption';
 $string['custombulkmessagesent'] = 'Persönl. Nachricht als Rundmail gesendet (> 75% der TN, mind. 3 TN)';
 $string['customdatesbtn'] = '<i class="fa fa-plus-square"></i> Benutzerdefinierte Termine...';
-$string['customdownloadreport'] = 'Bericht herunterladen';
 $string['customfield'] = 'Benutzerdefiniertes Feld, dessen Wert in den Buchungsoptionseinstellungen angegeben wird und in der Buchungsoptionsübersicht angezeigt wird';
 $string['customfieldchanged'] = 'Benutzerdefiniertes Feld geändert';
 $string['customfieldconfigure'] = 'Buchung: Benutzerdefinierte Buchungsoptionsfelder';
@@ -997,8 +1000,6 @@ $string['customlabelsdeprecated'] = '[VERALTET] Benutzerdefinierte Bezeichnungen
 $string['custommessagesent'] = 'Persönliche Nachricht gesendet';
 $string['customprofilefield'] = 'Custom profile field to check';
 $string['customprofilefieldvalue'] = 'Custom profile field value to check';
-$string['customreporttemplate'] = 'Vorlage für benutzerdefinierten Bericht';
-$string['customreporttemplates'] = 'Vorlagen für benutzerdefinierte Berichte';
 $string['customuserprofilefield'] = "Benutzerdefiniertes User Profilfeld";
 $string['customuserprofilefield_help'] = "Wenn Sie ein Benutzerdefiniertes User Profilfeld auswählen, ist der Preis-Teil der Kampagne nur für NutzerInnen wirksam, die auch einen bestimmten Wert in einem bestimmten Profilfeld haben.";
 $string['dashboardsummary'] = 'Allgemein';
@@ -1299,6 +1300,7 @@ $string['erroremptysemestername'] = 'Name des Semesters wurde nicht angegeben.';
 $string['errorholidayend'] = 'Ferienende darf nicht vor dem Ferienbeginn liegen.';
 $string['errorholidaystart'] = 'Ferienbeginn darf nicht nach dem Ferienende liegen.';
 $string['errormultibooking'] = 'Beim Buchen der Wahlfächer ist ein Fehler aufgetreten.';
+$string['errornorighttoaccessthisform'] = 'Sie sind nicht berechtigt, auf dieses Formular zuzugreifen.';
 $string['erroroptiondateend'] = 'Terminende muss nach dem Terminbeginn liegen.';
 $string['erroroptiondatestart'] = 'Terminbeginn muss vor dem Terminende liegen.';
 $string['errorpagination'] = 'Geben Sie ein Zahl ein, die größer als 0 ist';
@@ -1351,8 +1353,11 @@ $string['fieldofstudyoptions'] = "Shortcode um alle Buchungsoptionen eines Studi
  Außerdem muss in der angezeigten Buchungsoption in der Buchungsvoraussetzung einer der betroffenen
  Kurse ausgewählt sein.";
 $string['fillinatleastoneoption'] = 'Geben Sie mindestens 2 mögliche Buchungen an.';
+$string['filteravailalbetobook'] = 'Verfügbar zur Buchung';
+$string['filterbookingavailability'] = 'Buchungsverfügbarkeit';
 $string['filterbtn'] = 'Filtern';
 $string['filterenddate'] = 'Bis';
+$string['filterfullybooked'] = 'Ausgebucht';
 $string['filterstartdate'] = 'Von';
 $string['firstname'] = "Vorname";
 $string['firstnamerelated'] = "Vorname betroffene Person";
@@ -1403,11 +1408,11 @@ $string['helptext:emailsettings'] = '<div class="alert alert-warning style="marg
 </div>';
 $string['helptext:placeholders'] = '<div class="alert alert-info" style="margin-left: 200px;">
 <a data-toggle="collapse" data-bs-toggle="collapse" href="#collapsePlaceholdersHelptext" role="button" aria-expanded="false" aria-controls="collapsePlaceholdersHelptext">
-  <i class="fa fa-question-circle" aria-hidden="true"></i><span>&nbsp;Platzhalter, die Sie in Ihren E-Mails verwenden können.</span>
+  <i class="fa fa-question-circle" aria-hidden="true"></i><span>&nbsp;{Platzhalter} anzeigen, die Sie in Ihren E-Mails verwenden können.</span>
 </a>
 </div>
 <div class="collapse" id="collapsePlaceholdersHelptext">
-  <div class="card card-body">
+  <div class="card card-body mb-3">
     {$a}
   </div>
 </div>';
@@ -1581,7 +1586,6 @@ wurden. <br><br>Bitte stellen Sie sicher, dass zu allen E-Mail-Typen eine Vorlag
 $string['managebookedusers_heading'] = 'Buchungen verwalten für <b>{$a->scopestring}</b>: "{$a->title}"';
 $string['managebooking'] = 'Verwalten';
 $string['managebookinginstancetemplates'] = 'Buchungsinstanz-Vorlagen verwalten';
-$string['managecustomreporttemplates'] = 'Vorlagen für benutzerdefinierte Berichte verwalten';
 $string['manageoptiontemplates'] = 'Buchungsoptionsvorlagen verwalten';
 $string['manageresponses'] = 'Buchungen verwalten';
 $string['manageresponsesdownloadfields'] = 'Buchungen verwalten - Download (CSV, XLSX...)';
@@ -1818,14 +1822,15 @@ $string['optionbookablebody'] = 'Sie können {$a->title} ab sofort wieder buchen
 $string['optionbookabletitle'] = '{$a->title} wieder buchbar';
 $string['optiondate'] = 'Termin';
 $string['optiondateend'] = 'Ende';
+$string['optiondatefromevent'] = 'Wenn das sich das Ereignis auf einen bestimmten Termin bezieht, können Sie diesen Platzhalter verwenden, um ihn anzuzeigen.';
 $string['optiondates'] = 'Termine';
 $string['optiondatesmanager'] = 'Termine verwalten';
 $string['optiondatesmessage'] = 'Termin {$a->number}: {$a->date} <br> Von: {$a->starttime} <br> Bis: {$a->endtime}';
 $string['optiondatessuccessfullydelete'] = "Termin wurde gelöscht";
 $string['optiondatessuccessfullysaved'] = "Termin wurde bearbeitet";
 $string['optiondatestart'] = 'Beginn';
-$string['optiondatesteacheradded'] = 'Vertretung wurde eingetragen';
-$string['optiondatesteacherdeleted'] = 'Trainer:in wurde aus Trainingsjournal entfernt';
+$string['optiondatesteacheradded'] = 'Trainer:in wurde zu Einzeltermin hinzugefügt';
+$string['optiondatesteacherdeleted'] = 'Trainer:in wurde von Einzeltermin entfernt';
 $string['optiondatesteachersreport'] = 'Vertretungen & Absagen';
 $string['optiondatesteachersreport_desc'] = 'In diesem Report erhalten Sie eine Übersicht, welche:r Trainer:in an welchem Termin geleitet hat.<br>
 Standardmäßig werden alle Termine mit dem/den eingestellten Trainer:innen der Buchungsoption befüllt. Sie können einzelne Termine mit Vertretungen überschreiben.';
@@ -1934,6 +1939,7 @@ Link zur Umfrage: <a href="{pollurl}" target="_blank">{pollurl}</a>
 ';
 $string['pollurltextsubject'] = 'Bitte nehmen Sie an der Umfrage teil';
 $string['populatefromtemplate'] = 'Mit Vorlage ausfüllen';
+$string['postprogressstring'] = '% erreicht';
 $string['potentialsubscribers'] = 'Mögliche Nutzer:innen';
 $string['prepareimport'] = "Bereite den Import vor";
 $string['presence'] = "Anwesenheitsstatus";
@@ -2221,6 +2227,9 @@ $string['rulessettingsdesc'] = 'Einstellungen, die für die <a href="{$a}">Funkt
 $string['ruletemplatebookingoptioncompleted'] = "Template - Buchungsoption abgeschlossen mit Umfrage";
 $string['ruletemplatebookingoptioncompletedbody'] = "Sie haben die folgende Buchungsoption abgeschlossen:<br>{bookingdetails}<br> Bitte nehmen Sie an der Umfrage teil:<br><br>Link zur Umfrage: {pollurl} <br> Zum Kurs: {courselink}<br>Alle Buchungsoptionen ansehen: {bookinglink}";
 $string['ruletemplatebookingoptioncompletedsubject'] = "Buchungsoption abgeschlossen";
+$string['ruletemplatebookingoptionuncompleted'] = "Template - Buchungsoption abgeschlossen rückgängig gemacht";
+$string['ruletemplatebookingoptionuncompletedbody'] = "Der Abschluss für die folgende Buchungsoption wurde rückgängig gemacht:<br>{bookingdetails}";
+$string['ruletemplatebookingoptionuncompletedsubject'] = "Buchungsoption abgeschlossen rückgängig gemacht";
 $string['ruletemplateconfirmbooking'] = "Template - Bestätige Buchung";
 $string['ruletemplateconfirmbookingbody'] = "Sehr geehrte/r {firstname} {lastname},<br>Vielen Dank für Ihre Buchung<br>{bookingdetails}<br>Alles Gute!";
 $string['ruletemplateconfirmbookingsubject'] = "Sie haben erfolgreich gebucht";
@@ -2293,6 +2302,7 @@ $string['selectfieldofbookingoption'] = 'Bereich der Buchungsoption auswählen';
 $string['selectoptionid'] = 'Eine Auswahl treffen';
 $string['selectoptioninotherbooking'] = "Auswahl";
 $string['selectoptionsfirst'] = "Bitte zuerst die Buchungsoptionen auswählen.";
+$string['selectresponsiblecontactinbo'] = "Wähle Kontaktperson einer Buchungsoption";
 $string['selectstudentinbo'] = "Wähle Nutzer:innen einer Buchungsoption";
 $string['selectteacherinbo'] = "Wähle Trainer:innen einer Buchungsoption";
 $string['selectteacherswithprofilefieldonly'] = 'Trainer:innen-Auswahl einschränken';
@@ -2625,7 +2635,7 @@ in den Einstellungen anpassen. (Z.B. 45 statt 60 Minuten).<br/>
 &gt;&gt; Zu den Einstellungen...
 </a>';
 $string['teamsmeeting'] = 'Teams-Meeting';
-$string['template'] = 'Vorlagen';
+$string['template'] = 'Template';
 $string['templatecategoryname'] = 'Kurzname der Kurskategorie, in der sich die Vorlagenkurse befinden.';
 $string['templatecategoryname_desc'] = 'Buchungsoptionen können mit Moodle-Kursen verknüpft werden. Dieses Feature erlaubt es, die Kurse beim ersten Speichern der Buchungsoption zu erstellen.';
 $string['templatedeleted'] = 'Vorlage wurde gelöscht!';

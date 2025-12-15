@@ -362,6 +362,19 @@ class booking_bookit {
                 // This means we can actually book.
                 $isavailable = true;
             } else if ($id === MOD_BOOKING_BO_COND_ASKFORCONFIRMATION) {
+                $cache = cache::make('mod_booking', 'confirmbooking');
+                $cachekey = $userid . "_" . $settings->id . "_confirmation";
+                $now = time();
+                $cache->set($userid, [$cachekey => $now]);
+
+                $isavailable = false;
+            } else if ($id === MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION) {
+                // Make sure cache is not blocking anymore.
+                $cache = cache::make('mod_booking', 'confirmbooking');
+                $cachekey = $userid . "_" . $settings->id . '_confirmation';
+                $cache->delete($userid);
+
+                // This means we can actuall book on waitinglist.
                 $isavailable = true;
             } else if ($id === MOD_BOOKING_BO_COND_ALREADYBOOKED || $id === MOD_BOOKING_BO_COND_ONWAITINGLIST) {
                 $cancelmyself = new cancelmyself();
@@ -587,7 +600,7 @@ class booking_bookit {
 
         /** @var renderer $output */
         $output = $PAGE->get_renderer('mod_booking');
-        $data = new bookingoption_description($itemid, null, MOD_BOOKING_DESCRIPTION_WEBSITE, false, null, $user);
+        $data = new bookingoption_description($itemid, null, MOD_BOOKING_DESCRIPTION_CARTITEM, false, null, $user);
         $description = $output->render_bookingoption_description_cartitem($data);
 
         $optiontitle = $bookingoption->option->text;

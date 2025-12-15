@@ -28,6 +28,7 @@ namespace mod_booking;
 use advanced_testcase;
 use local_shopping_cart\local\cartstore;
 use local_shopping_cart\shopping_cart;
+use mod_booking\option\optiondate;
 use stdClass;
 use mod_booking\teachers_handler;
 use mod_booking\booking_rules\booking_rules;
@@ -61,17 +62,13 @@ final class rules_test extends advanced_testcase {
 
     /**
      * Mandatory clean-up after each test.
+     * @return void
      */
     public function tearDown(): void {
-        global $DB;
-
         parent::tearDown();
-        // Mandatory to solve potential cache issues.
-        singleton_service::destroy_instance();
-        // Mandatory to deal with static variable in the booking_rules.
-        rules_info::destroy_singletons();
-        booking_rules::$rules = [];
-        cartstore::reset();
+        /** @var mod_booking_generator $plugingenerator */
+        $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
+        $plugingenerator->teardown();
     }
 
     /**
@@ -712,6 +709,11 @@ final class rules_test extends advanced_testcase {
         $option1 = $plugingenerator->create_option($record);
         singleton_service::destroy_booking_option_singleton($option1->id);
 
+        // Check the daystonotify values for the sessions.
+        $settings = singleton_service::get_instance_of_booking_option_settings($option1->id);
+        $this->assertEquals(reset($settings->sessions)->daystonotify, "0");
+        $this->assertEquals(end($settings->sessions)->daystonotify, "7");
+
         $messages = \core\task\manager::get_adhoc_tasks('\mod_booking\task\send_mail_by_rule_adhoc');
 
         // Validate scheduled adhoc tasks. Validate messages - order might be free.
@@ -740,6 +742,21 @@ final class rules_test extends advanced_testcase {
                 continue;
             }
         }
+
+        // Now, check, if updating the daystonotify field works.
+        $record->id = $option1->id;
+        $record->cmid = $option1->cmid;
+        $record->daystonotify_0 = 3;
+        $record->daystonotify_1 = 4;
+        $record->import = 1;
+        booking_option::update($record);
+
+        // Check if updating the daystonotify field for the second session worked.
+        singleton_service::destroy_booking_option_singleton($option1->id);
+        $settings = singleton_service::get_instance_of_booking_option_settings($option1->id);
+        $this->assertEquals(reset($settings->sessions)->daystonotify, "3");
+        $this->assertEquals(end($settings->sessions)->daystonotify, "4");
+        singleton_service::destroy_booking_option_singleton($option1->id);
     }
 
     /**
@@ -1041,7 +1058,10 @@ final class rules_test extends advanced_testcase {
 
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ASKFORCONFIRMATION, $id);
-
+        $result = booking_bookit::bookit('option', $settings->id, $student1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, false);
+        // This time it is coming from MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION.
+        $this->assertEquals(MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION, $id);
         $result = booking_bookit::bookit('option', $settings->id, $student1->id);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
@@ -1190,6 +1210,10 @@ final class rules_test extends advanced_testcase {
         $this->setUser($student2);
 
         $result = booking_bookit::bookit('option', $settings->id, $student2->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student2->id, false);
+        // This time it is coming from MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION.
+        $this->assertEquals(MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION, $id);
+        $result = booking_bookit::bookit('option', $settings->id, $student2->id);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
 
@@ -1202,6 +1226,10 @@ final class rules_test extends advanced_testcase {
         // Book the student1 via waitinglist.
         $this->setUser($student1);
 
+        $result = booking_bookit::bookit('option', $settings->id, $student1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, false);
+        // This time it is coming from MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION.
+        $this->assertEquals(MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION, $id);
         $result = booking_bookit::bookit('option', $settings->id, $student1->id);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
@@ -1900,6 +1928,10 @@ final class rules_test extends advanced_testcase {
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $user2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ASKFORCONFIRMATION, $id);
         $result = booking_bookit::bookit('option', $settings->id, $user2->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $user2->id, false);
+        // This time it is coming from MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION.
+        $this->assertEquals(MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION, $id);
+        $result = booking_bookit::bookit('option', $settings->id, $user2->id);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $user2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
         // User doesn't have supervisor, so no tasks expected.
@@ -1909,6 +1941,10 @@ final class rules_test extends advanced_testcase {
         $this->setUser($user1);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $user1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ASKFORCONFIRMATION, $id);
+        $result = booking_bookit::bookit('option', $settings->id, $user1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $user1->id, false);
+        // This time it is coming from MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION.
+        $this->assertEquals(MOD_BOOKING_BO_COND_CONFIRMASKFORCONFIRMATION, $id);
         $result = booking_bookit::bookit('option', $settings->id, $user1->id);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $user1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
@@ -1925,6 +1961,58 @@ final class rules_test extends advanced_testcase {
         // If this causes failures because of the order, make less strict comparison. Maybe first message is send to first deputy...
         $this->assertEquals($deputy2->id, $messages[0]->useridto);
         $this->assertEquals($deputy->id, $messages[1]->useridto);
+    }
+
+    /**
+     * Test that compare_optiondates() returns false
+     * when the "daystonotify" field differs.
+     * @covers \mod_booking\option\optiondate::compare_optiondates
+     *
+     * @return void
+     */
+    public function test_different_daystonotify_returns_false(): void {
+        $oldoptiondate = [
+            'optiondateid' => 1,
+            'coursestarttime' => 1700000000,
+            'courseendtime' => 1700003600,
+            'daystonotify' => 5,
+        ];
+
+        $newoptiondate = [
+            'optiondateid' => 1,
+            'coursestarttime' => 1700000000,
+            'courseendtime' => 1700003600,
+            'daystonotify' => 10,
+        ];
+
+        $result = optiondate::compare_optiondates($oldoptiondate, $newoptiondate);
+        $this->assertFalse($result);
+    }
+
+    /**
+     * Test that compare_optiondates() returns true
+     * when all fields including "daystonotify" are identical.
+     * @covers \mod_booking\option\optiondate::compare_optiondates
+     *
+     * @return void
+     */
+    public function test_same_daystonotify_returns_true(): void {
+        $oldoptiondate = [
+            'optiondateid' => 1,
+            'coursestarttime' => 1700000000,
+            'courseendtime' => 1700003600,
+            'daystonotify' => 5,
+        ];
+
+        $newoptiondate = [
+            'optiondateid' => 1,
+            'coursestarttime' => 1700000000,
+            'courseendtime' => 1700003600,
+            'daystonotify' => 5,
+        ];
+
+        $result = optiondate::compare_optiondates($oldoptiondate, $newoptiondate);
+        $this->assertTrue($result);
     }
 
     /**

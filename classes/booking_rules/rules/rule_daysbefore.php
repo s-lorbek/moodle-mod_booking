@@ -159,7 +159,7 @@ class rule_daysbefore implements booking_rule {
      * The role has to determine the handler for condtion and action and get the right json object.
      * @param stdClass $data form data reference
      */
-    public function save_rule(stdClass &$data) {
+    public function save_rule(stdClass &$data): int {
         global $DB;
 
         $record = new stdClass();
@@ -189,10 +189,12 @@ class rule_daysbefore implements booking_rule {
         if ($data->id ?? false) {
             $record->id = $data->id;
             $DB->update_record('booking_rules', $record);
+            $ruleid = $data->id;
         } else {
             $ruleid = $DB->insert_record('booking_rules', $record);
             $this->ruleid = $ruleid;
         }
+        return $ruleid;
     }
 
     /**
@@ -271,15 +273,14 @@ class rule_daysbefore implements booking_rule {
      * @param int $optionid
      * @param int $userid
      * @param int $nextruntime
+     * @param int $optiondateid
      * @return bool true if the rule still applies, false if not
      */
-    public function check_if_rule_still_applies(int $optionid, int $userid, int $nextruntime): bool {
+    public function check_if_rule_still_applies(int $optionid, int $userid, int $nextruntime, int $optiondateid = 0): bool {
 
         if (empty($this->ruleisactive)) {
             return false;
         }
-
-        $rulestillapplies = true;
 
         if (!applybookingrules::apply_rule($optionid, $this->ruleid)) {
             return false;
@@ -288,27 +289,38 @@ class rule_daysbefore implements booking_rule {
         // We retrieve the same sql we also use in the execute function.
         $records = $this->get_records_for_execution($optionid, $userid, true);
 
+        // If there are multiple records (like for reminders for optiondates)...
+        // ...we need to make sure that at least one runtime matches.
         if (empty($records)) {
-            $rulestillapplies = false;
+            return false;
         }
 
+        $rulestillapplies = true;
         foreach ($records as $record) {
-            // The override happens within the SQL of get_records_for_execution.
-            // So $record->daystonotify will have the correct value.
-            if (isset($record->daystonotify)) {
-                $this->days = (int)$record->daystonotify;
-            }
-            $oldnextruntime = (int) $record->datefield - ((int) $this->days * 86400);
-
+            // Check if this record matches the optiondateid.
             if (
-                $oldnextruntime != $nextruntime
-                && !PHPUNIT_TEST
+                !empty($optiondateid)
+                && isset($record->optiondateid)
             ) {
+                // If the optiondateid doesn't macht, look for other matches.
+                // If no match is found, rule doesn't apply anymore.
+                if ($record->optiondateid != $optiondateid) {
+                    $rulestillapplies = false;
+                    continue;
+                }
+                // Match found, now compare the records.
+                $days = isset($record->daystonotify) ? (int)$record->daystonotify : 0;
+                $oldnextruntime = (int)$record->datefield - ($days * 86400);
+
+                if ($oldnextruntime == $nextruntime) {
+                    $rulestillapplies = true;
+                    break;
+                }
+                // If we found a matching optiondateid but times don't match,
+                // set to false - maybe rules has changed.
                 $rulestillapplies = false;
-                break;
             }
         }
-
         return $rulestillapplies;
     }
 

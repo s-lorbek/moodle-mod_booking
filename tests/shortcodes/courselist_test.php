@@ -27,7 +27,6 @@
 namespace mod_booking;
 
 use advanced_testcase;
-use Closure;
 use coding_exception;
 use context_system;
 use local_wunderbyte_table\wunderbyte_table;
@@ -59,6 +58,16 @@ final class courselist_test extends advanced_testcase {
         time_mock::init();
         time_mock::set_mock_time(strtotime('now'));
         singleton_service::destroy_instance();
+    }
+
+    /**
+     * Mandatory clean-up after each test.
+     */
+    public function tearDown(): void {
+        parent::tearDown();
+        /** @var mod_booking_generator $plugingenerator */
+        $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
+        $plugingenerator->teardown();
     }
 
     /**
@@ -158,7 +167,7 @@ final class courselist_test extends advanced_testcase {
 
         // Now we have multiple options in multiple bookings and multiple courses.
         $records = $DB->get_records('booking_options');
-        $this->assertCount(24, $records, 'Booking options were not created correctly');
+        $this->assertCount(32, $records, 'Booking options were not created correctly');
 
         // Prepare the args.
         $args = $data['args'];
@@ -181,11 +190,13 @@ final class courselist_test extends advanced_testcase {
         $env = new stdClass();
         $next = function () {
         };
-        $args['all'] = 1;
 
         $shortcode = shortcodes::courselist('courselist', $args, null, $env, $next);
         $this->assertNotEmpty($shortcode);
         $this->assertStringContainsString($expected['tablestringcontains'], $shortcode);
+        if (isset($expected['tablestringnotcontains'])) {
+            $this->assertStringNotContainsString($expected['tablestringnotcontains'], $shortcode);
+        }
         $pregmatch = preg_match('/<div[^>]*\sdata-encodedtable=["\']?([^"\'>\s]+)["\']?/i', $shortcode, $matches);
         $this->assertEquals($expected['displaytable'], $pregmatch);
         if (!$expected['displaytable']) {
@@ -215,7 +226,34 @@ final class courselist_test extends advanced_testcase {
                 [
                     'tablestringcontains' => "wunderbyte_table_container",
                     'displaytable' => true,
-                    'numberofrecords' => 6,
+                    'numberofrecords' => 8,
+                ],
+            ],
+            'not_all_options' => [
+                [
+                    'args' => [
+                        'cmidsetting' => 'first',
+                    ],
+                ],
+                [
+                    'tablestringcontains' => "in the future",
+                    'tablestringnotcontains' => "Test option in the past",
+                    'displaytable' => true,
+                    'numberofrecords' => 1,
+                ],
+            ],
+            'options_in_the_past' => [
+                [
+                    'args' => [
+                        'cmidsetting' => 'first',
+                        'all' => 'past',
+                    ],
+                ],
+                [
+                    'tablestringcontains' => "Test option in the past",
+                    'tablestringnotcontains' => "in the future",
+                    'displaytable' => true,
+                    'numberofrecords' => 1,
                 ],
             ],
             'settingoff' => [
@@ -351,16 +389,25 @@ final class courselist_test extends advanced_testcase {
                     'boavenrolledincohorts' => 'testcohort',
                     'customfield_customcat' => 'Text 2',
                 ],
+                [
+                    'text' => 'Option in the future',
+                    'description' => 'Test option in the future',
+                    'maxanswers' => 1,
+                    'coursestarttime_0' => strtotime('now + 3 day', time()),
+                    'courseendtime_0' => strtotime('now + 4 day', time()),
+                    'daystonotify_0' => "0",
+                    'optiondateid_0' => "0",
+                ],
+                [
+                    'text' => 'Option in the past',
+                    'description' => 'Test option in the past',
+                    'maxanswers' => 1,
+                    'coursestarttime_0' => strtotime('now - 4 day', time()),
+                    'courseendtime_0' => strtotime('now - 3 day', time()),
+                    'daystonotify_0' => "0",
+                    'optiondateid_0' => "0",
+                ],
             ],
         ];
-    }
-
-    /**
-     * Mandatory clean-up after each test.
-     */
-    public function tearDown(): void {
-        parent::tearDown();
-        // Mandatory clean-up.
-        singleton_service::destroy_instance();
     }
 }

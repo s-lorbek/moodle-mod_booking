@@ -31,6 +31,7 @@ use mod_booking\event\bookinganswer_confirmed;
 use mod_booking\event\bookinganswer_denied;
 use mod_booking\local\bookingstracker\bookingstracker_helper;
 use mod_booking\local\confirmationworkflow\confirmation;
+use mod_booking\price;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -97,6 +98,19 @@ class manageusers_table extends wunderbyte_table {
             return '';
         }
         return date('d.m.Y', $values->timemodified);
+    }
+
+    /**
+     * Return column coursestarttime.
+     *
+     * @param stdClass $values
+     * @return string
+     */
+    public function col_coursestarttime(stdClass $values): string {
+        if (empty($values->coursestarttime)) {
+            return '';
+        }
+        return date('d.m.Y', $values->coursestarttime);
     }
 
     /**
@@ -354,11 +368,17 @@ class manageusers_table extends wunderbyte_table {
             $userid
         );
 
+        // Get the price for the user.
+        // Sometimes the option is free for the user even when the option has a price (userprice = 1).
+        // In this case, the option should be booked immediately for the user.
+        $userprice = price::get_price('option', $option->id, $user);
+
         // If booking option is booked with a price, we don't book directly but just allow to book.
         // Exeption: The booking is autoenrol and needs to be booked directly...
         // In this case price can be given for bookingoption, but was already payed before.
         if (
             !empty($settings->jsonobject->useprice)
+            && (isset($userprice['price']) && $userprice['price'] != 0)
             && empty(get_config('booking', 'turnoffwaitinglist'))
             && (
                 $erwaitinglist = enrollink::enrolmentstatus_waitinglist($settings) === false
@@ -668,8 +688,9 @@ class manageusers_table extends wunderbyte_table {
         $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
         $ba = singleton_service::get_instance_of_booking_answers($settings);
 
-        if (!empty($values->json)) {
-            $jsonobject = json_decode($values->json);
+        $jsonobject = (!empty($values->json)) ? json_decode($values->json) : null;
+
+        if (!empty($jsonobject)) {
             if (!empty($jsonobject->confirmwaitinglist)) {
                 $data[] = [
                     'label' => get_string('unconfirm', 'mod_booking'), // Name of your action button.
@@ -710,8 +731,26 @@ class manageusers_table extends wunderbyte_table {
             ];
         }
 
+        // We rely on the number of required confirmations to decide whether to show the confirmation,
+        // because if we only check whether the user has already confirmed, we may run into problems.
+        // For example, when more than one confirmation is required and the user is both the first confirmer
+        // and the second confirmer’s deputy, checking only the previous confirmation could fail.
+        // By relying on the number of confirmations instead, we avoid this issue.
+        // You might worry about the case where more than one confirmation is required
+        // and the first confirmer has already confirmed. In that situation,
+        // the logic inside check_confirm_capability ensures the correct turn is checked.
+
+        // Get number of required confirmations.
+        $requiredconfirmations = confirmation::get_required_confirmation_count($optionid);
+        if (!empty($jsonobject) && !empty($jsonobject->confirmationcount)) {
+            $currentconfirmations = (int) $jsonobject->confirmationcount;
+        } else {
+            $currentconfirmations = 0;
+        }
+
         if (
                 $allowedtoconfirm
+                && $requiredconfirmations > $currentconfirmations
         ) {
             $data[] = [
                 'label' => '', // Name of your action button.
