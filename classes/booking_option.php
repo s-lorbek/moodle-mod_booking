@@ -42,6 +42,7 @@ use mod_booking\bo_availability\conditions\customform;
 use mod_booking\bo_availability\conditions\optionhasstarted;
 use mod_booking\event\booking_debug;
 use mod_booking\event\booking_rulesexecutionfailed;
+use mod_booking\event\bookinganswer_movedupfromwaitinglist;
 use mod_booking\event\bookinganswer_presencechanged;
 use mod_booking\event\bookinganswer_notesedited;
 use mod_booking\event\bookinganswer_waitingforconfirmation;
@@ -540,9 +541,11 @@ class booking_option {
                 $text = $bookingsettings->beforebookedtext;
             }
         }
-
-        $text = placeholders_info::render_text($text, $this->settings->cmid, $this->settings->id, $userid);
-
+        try {
+            $text = placeholders_info::render_text($text, $this->settings->cmid, $this->settings->id, $userid);
+        } catch (moodle_exception $e) {
+            $text = $e->getMessage();
+        }
         return format_text($text);
     }
 
@@ -576,7 +579,7 @@ class booking_option {
                    AND u.deleted = 0
                    AND ba.optionid = :optionid
                    AND ba.waitinglist = 0
-              ORDER BY ba.timemodified ASC";
+              ORDER BY ba.timemodified ASC, ba.id ASC";
 
         $params = ["optionid" => $this->optionid];
 
@@ -616,7 +619,7 @@ class booking_option {
                        AND u.id = gm.userid
                        AND gm.groupid $insql
                   GROUP BY u.id
-                  ORDER BY ba.timemodified ASC";
+                  ORDER BY ba.timemodified ASC, ba.id ASC";
             $groupmembers = $DB->get_records_sql($sql, array_merge($params, $inparams));
             $this->bookedusers = array_intersect_key($groupmembers, $this->booking->canbookusers);
             $this->bookedvisibleusers = $this->bookedusers;
@@ -1403,6 +1406,26 @@ class booking_option {
         ) {
             $historystatus = MOD_BOOKING_STATUSPARAM_BOOKOTHEROPTIONS;
         }
+
+        // Check the current waiting list status of the answer.
+        // If it is currently on the waiting list and the new status is booked,
+        // trigger the moveupfromwaitinglist event.
+        $answersonwaitinglist = $bookinganswers->get_usersonwaitinglist();
+        if (!empty($answersonwaitinglist[$user->id]) && $waitinglist == MOD_BOOKING_STATUSPARAM_BOOKED) {
+            $other = [];
+            $other['baid'] = $answersonwaitinglist[$user->id]->baid ?? 0;
+            $other['json'] = $answersonwaitinglist[$user->id]->json ?? '';
+            $event = bookinganswer_movedupfromwaitinglist::create(
+                ['objectid' => $this->optionid,
+                    'context' => context_module::instance($this->cmid),
+                    'userid' => $USER->id,
+                    'relateduserid' => $user->id,
+                    'other' => $other,
+                ]
+            );
+            $event->trigger();
+        }
+
         $baid = self::write_user_answer_to_db(
             $this->booking->id,
             $frombookingid,
@@ -2814,25 +2837,20 @@ class booking_option {
             get_config('booking', 'usecompetencies')
             && !empty($userdata->completed)
         ) {
+            // Only if we have the competency in the right context AND there is no error, we do it directly.
+            $assigned = false;
             try {
-                $context = context_module::instance($settings->cmid);
-                if (!has_capability('moodle/competency:competencygrade', $context)) {
-                    $task = new assign_competency();
-                    // We need to execute the task as admin user.
-                    $task->set_userid(get_admin()->id);
-                    $task->set_custom_data([
-                        'cmid' => $cmid,
-                        'optionid' => $optionid,
-                        'userid' => $userid,
-                    ]);
-                    manager::queue_adhoc_task($task);
-                } else {
+                $cm = get_coursemodule_from_id(null, $settings->cmid, 0, false, MUST_EXIST);
+                $coursecontext = context_course::instance($cm->course);
+
+                if (has_capability('moodle/competency:competencygrade', $coursecontext)) {
                     // Call your static function in mod_booking.
                     competencies::assign_competencies(
                         $settings->cmid,
                         $optionid,
                         $userid
                     );
+                    $assigned = true;
                 }
             } catch (Throwable $e) {
                 $message = $e->getMessage();
@@ -2847,6 +2865,18 @@ class booking_option {
                     ]);
                     $event->trigger();
                 }
+                $assigned = false;
+            }
+            if (!$assigned) {
+                $task = new assign_competency();
+                // We need to execute the task as admin user.
+                $task->set_userid(get_admin()->id);
+                $task->set_custom_data([
+                    'cmid' => $cmid,
+                    'optionid' => $optionid,
+                    'userid' => $userid,
+                ]);
+                manager::queue_adhoc_task($task);
             }
         }
 
@@ -3307,7 +3337,6 @@ class booking_option {
             $returnsession = [
                 'datestring' => $date->datestring,
             ];
-
             // 0 in a date id means it comes form normal course start & endtime.
             // Therefore, there can't be these customfields.
             if ($withcustomfields && $date->id !== 0) {
@@ -3322,11 +3351,13 @@ class booking_option {
                     $removeonlinesessionlinks
                 );
             }
-
-            if (class_exists('local_entities\entitiesrelation_handler')) {
+            if (
+                class_exists('local_entities\entitiesrelation_handler')
+                && $withcustomfields
+            ) {
                 $erhandler = new entitiesrelation_handler('mod_booking', 'optiondate', $date->id);
                 $entity = $erhandler->get_instance_data($date->id);
-                $entityid = $erhandler->get_entityid_by_instanceid($date->id);
+                $entityid = $entity->id ?? 0;
                 $entityurl = null; // Important: initialize!
                 if (!empty($entityid)) {
                     $entityurl = new moodle_url('/local/entities/view.php', ['id' => $entityid]);
