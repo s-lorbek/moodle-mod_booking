@@ -27,6 +27,7 @@
 
 namespace mod_booking\output;
 
+use context_system;
 use local_wunderbyte_table\filters\types\datepicker;
 use local_wunderbyte_table\filters\types\standardfilter;
 use local_wunderbyte_table\wunderbyte_table;
@@ -40,6 +41,7 @@ use moodle_exception;
 use renderer_base;
 use renderable;
 use templatable;
+use tool_certificate\certificate;
 
 /**
  * This file contains the definition for the renderable classes for booked users.
@@ -146,7 +148,8 @@ class booked_users implements renderable, templatable {
                 array_keys($columns),
                 array_values($columns),
                 false,
-                true
+                true,
+                $customfields
             ) : null;
 
         // For optiondate scope, we only show booked users.
@@ -164,7 +167,8 @@ class booked_users implements renderable, templatable {
                 array_values($columns),
                 // Sorting of waiting list only possible if setting to show place is enabled.
                 (bool)get_config('booking', 'waitinglistshowplaceonwaitinglist'),
-                true
+                true,
+                $customfields
             ) : null;
 
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_RESERVED);
@@ -279,7 +283,7 @@ class booked_users implements renderable, templatable {
         $table->showreloadbutton = true;
         $table->showrowcountselect = true;
 
-        $html = $table->outhtml(10, false);
+        $html = $table->outhtml(100, false);
         return count($table->rawdata) > 0 ? $html : null;
     }
 
@@ -500,7 +504,7 @@ class booked_users implements renderable, templatable {
             'instancename',
         ]);
 
-        [$idstring, $tablecachehash, $html] = $table->lazyouthtml(20, true);
+        [$idstring, $tablecachehash, $html] = $table->lazyouthtml(100, true);
         return $html;
     }
 
@@ -582,6 +586,36 @@ class booked_users implements renderable, templatable {
     }
 
     /**
+     * Function to create delete button.
+     *
+     * @return array
+     *
+     */
+    public static function create_certificate_button(): array {
+        global $USER;
+        if (!get_config('booking', 'certificateon') || !has_capability('tool/certificate:manage', context_system::instance())) {
+            return [];
+        }
+        return [
+            'iclass' => 'fa fa-fw fa-certificate',
+            'label' => get_string('bookingstrackertriggercertificate', 'mod_booking'),
+            'class' => 'btn btn-success btn-sm ms-1',
+            'href' => '#',
+            'methodname' => 'trigger_certificate_booking_answers',
+            'nomodal' => false,
+            'selectionmandatory' => true,
+            'id' => -1,
+            'data' => [
+                'id' => 'id',
+                'titlestring' => 'issuecertificate',
+                'bodystring' => 'issuecertificatebody',
+                'submitbuttonstring' => 'apply',
+                'component' => 'mod_booking',
+            ],
+        ];
+    }
+
+    /**
      * Return an array of the default labels of the tables.
      * @return array
      */
@@ -594,7 +628,7 @@ class booked_users implements renderable, templatable {
             'deletedbookings' => get_string('deletedbookings', 'mod_booking'),
             'bookinghistory' => get_string('bookinghistory', 'mod_booking'),
             'optionstoconfirm' => get_string('optionstoconfirm', 'mod_booking'),
-            'previouselybooked' => get_string('previouselybooked', 'mod_booking'),
+            'previouslybooked' => get_string('previouslybooked', 'mod_booking'),
         ];
     }
 }

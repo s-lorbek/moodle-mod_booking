@@ -25,7 +25,7 @@
 
 namespace mod_booking;
 
-use advanced_testcase;
+use mod_booking\booking_advanced_testcase;
 use local_entities_generator;
 use mod_booking\booking_rules\rules_info;
 use tool_mocktesttime\time_mock;
@@ -39,7 +39,7 @@ use mod_booking_generator;
  * @copyright 2025 Wunderbyte GmbH <info@wunderbyte.at>
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-final class rule_specifictime_test extends advanced_testcase {
+final class rule_specifictime_test extends booking_advanced_testcase {
     /**
      * String that is displayed in the mtask log when mail was send successfully.
      *
@@ -52,18 +52,7 @@ final class rule_specifictime_test extends advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        time_mock::init();
         time_mock::set_mock_time(strtotime('now'));
-    }
-
-    /**
-     * Mandatory clean-up after each test.
-     */
-    public function tearDown(): void {
-        parent::tearDown();
-        /** @var mod_booking_generator $plugingenerator */
-        $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
-        $plugingenerator->teardown();
     }
 
     /**
@@ -148,6 +137,7 @@ final class rule_specifictime_test extends advanced_testcase {
         }
         $option = $plugingenerator->create_option($record);
         singleton_service::destroy_booking_option_singleton($option->id);
+        $settings = singleton_service::get_instance_of_booking_option_settings($option->id);
 
         // Create a booking option answer.
         $result = $plugingenerator->create_answer(['optionid' => $option->id, 'userid' => $student1->id]);
@@ -200,6 +190,51 @@ final class rule_specifictime_test extends advanced_testcase {
      */
     public static function rule_multiple_dates_override_provider(): array {
         return [
+            'Reminder to manager two hours before booking opening time (bookingopeningtime)' => [
+                [
+                    'rulessettings' => [
+                        0 => [
+                            'name' => 'Reminder to manager two hours before booking opening time (bookingopeningtime)',
+                            'useastemplate' => 0,
+                            'conditionname' => 'select_booking_manager',
+                            'conditiondata' => '',
+                            'actionname' => 'send_mail',
+                            'actiondata' => '{"sendical":0,"sendicalcreateorcancel":"",
+                                "subject":"A new session of {Title} will start in 2 hours",
+                                "template":"Hi {firstname}. Booking will be allowed in 2 hours:<br>{bookingdetails}",
+                                "templateformat":"1"}',
+                            'rulename' => 'rule_specifictime',
+                            'ruledata' => '{"seconds":7200,"datefield":"bookingopeningtime"}',
+                        ],
+                    ],
+                    'useoption' => 3,
+                    'usecourse' => 0,
+                    'optionsettings' => [
+                        [
+                            'restrictanswerperiodopening' => 1,
+                            'bookingopeningtime' => '4 June 2050 18:00', // Required in case of importing!
+                        ],
+                    ],
+                ],
+                [
+                    'initialnumberoftasks' => 1,
+                    'tasksperoptiondates' => [
+                        [
+                            'mock_time' => '4 June 2050 15:00',
+                            'messages_sent' => 0, // More than 2 hours before bookingopeningtime.
+                        ],
+                        [
+                            'mock_time' => '4 June 2050 16:30',
+                            'messages_sent' => 1, // Less than 2 hours before bookingopeningtime.
+                            'contains_success' => self::MAIL_SUCCES_TRACE,
+                        ],
+                        [
+                            'mock_time' => '5 June 2050 18:00',
+                            'messages_sent' => 0, // Confirm no other messages on days before actual booking.
+                        ],
+                    ],
+                ],
+            ],
             'Reminder 2 days after a selflearning course has ended (selflearningcourseenddate)' => [
                 [
                     'rulessettings' => [
@@ -318,6 +353,66 @@ final class rule_specifictime_test extends advanced_testcase {
                             'messages_sent' => 0, // Confirm no other messages on days before.
                         ],
                     ],
+                ],
+            ],
+            'Self-learning options are skipped for reminders based on coursestarttime' => [
+                [
+                    'rulessettings' => [
+                        0 => [
+                            'name' => 'Skip self-learning coursestarttime reminders',
+                            'useastemplate' => 0,
+                            'conditionname' => 'select_student_in_bo',
+                            'conditiondata' => '{"borole":"0"}',
+                            'actionname' => 'send_mail',
+                            'actiondata' => '{"sendical":0,"sendicalcreateorcancel":"",
+                                "subject":"A session {Title} starts soon",
+                                "template":"Hi {firstname}. The session of \\"{title}\\" starts soon:<br>{bookingdetails}",
+                                "templateformat":"1"}',
+                            'rulename' => 'rule_specifictime',
+                            'ruledata' => '{"seconds":604800,"datefield":"coursestarttime"}',
+                        ],
+                    ],
+                    'useoption' => 0,
+                    'usecourse' => 1,
+                    'optionsettings' => [
+                        [
+                            'selflearningcourse' => 1,
+                            'duration' => 84400 * 4,
+                        ],
+                    ],
+                ],
+                [
+                    'initialnumberoftasks' => 0,
+                ],
+            ],
+            'Self-learning options are skipped for reminders based on courseendtime' => [
+                [
+                    'rulessettings' => [
+                        0 => [
+                            'name' => 'Skip self-learning courseendtime reminders',
+                            'useastemplate' => 0,
+                            'conditionname' => 'select_student_in_bo',
+                            'conditiondata' => '{"borole":"0"}',
+                            'actionname' => 'send_mail',
+                            'actiondata' => '{"sendical":0,"sendicalcreateorcancel":"",
+                                "subject":"A session {Title} was 2 days ago",
+                                "template":"Hi {firstname}. The session of \\"{title}\\" was 2 days ago:<br>{bookingdetails}",
+                                "templateformat":"1"}',
+                            'rulename' => 'rule_specifictime',
+                            'ruledata' => '{"seconds":-172800,"datefield":"courseendtime"}',
+                        ],
+                    ],
+                    'useoption' => 0,
+                    'usecourse' => 1,
+                    'optionsettings' => [
+                        [
+                            'selflearningcourse' => 1,
+                            'duration' => 84400 * 4,
+                        ],
+                    ],
+                ],
+                [
+                    'initialnumberoftasks' => 0,
                 ],
             ],
             'Session reminders: Remind users before every session 1st in 2 days, 2nd and 3rd - in 10 minutes' => [
@@ -452,6 +547,16 @@ final class rule_specifictime_test extends advanced_testcase {
                     'daystonotify_2' => "0",
                     'coursestarttime_2' => strtotime('15 June 2050 15:00'),
                     'courseendtime_2' => strtotime('15 June 2050 16:00'),
+                ],
+                // Option 1 with 1 session in 2050 with booking oprning time being set.
+                3 => [
+                    'text' => 'Option: in 2050',
+                    'description' => 'Will start in 2050',
+                    'chooseorcreatecourse' => 1, // Required.
+                    'optiondateid_0' => "0",
+                    'daystonotify_0' => "0",
+                    'coursestarttime_0' => strtotime('6 June 2050 15:00'),
+                    'courseendtime_0' => strtotime('6 June 2050 16:00'),
                 ],
             ],
         ];

@@ -15,41 +15,25 @@
     along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 }}
 {{!
-    @template mod_booking/optiondates_only
+    @template mod_booking/performance/actions/purge_cache
 
-    Classes required for JS:
-    * none
-
-    Data attributes required for JS:
-    * data-region
+    TODO describe template performance
 
     Example context (json):
     {
-        "showsessions" : true,
-        "onesession" : false,
-        "sessions" : [
-            {
-                "key" : [
-                    {
-                        "startdatetime" : "3 March 2023, 10:30 AM",
-                        "enddatetime" : "3 March 2023, 11:45 AM"
-                    }
-                ]
-            }
-        ]
     }
 }}
-{{#showsessions}}
-{{#onesession}}
-{{#dates}}
-<b>{{{startdatetime}}} - {{{enddatetime}}}</b>
-{{/dates}}
-{{/onesession}}
-{{^onesession}}
-<ul>
-{{#dates}}
-    <li>{{{startdatetime}}} - {{{enddatetime}}}</li>
-{{/dates}}
-</ul>
-{{/onesession}}
-{{/showsessions}}
+<div class="form-check mb-2">
+    <input
+        class="form-check-input"
+        type="checkbox"
+        name="actions[{{id}}][enabled]"
+        id="action-{{id}}"
+        value="1"
+        {{#enabled}}checked{{/enabled}}
+    >
+
+    <label class="form-check-label" for="action-{{id}}">
+        {{label}}
+    </label>
+</div>

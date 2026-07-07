@@ -154,7 +154,12 @@ class mobile {
                         $formvalidated = $customformstore->validation($customform, (array)$customformuserdata);
                     }
                     if (empty($formvalidated)) {
-                        $data['submit']['label'] = $button->data['main']['label'];
+                        if (isset($button->data['main']['label'])) {
+                            if (!isset($data['submit'])) {
+                                $data['submit'] = [];
+                            }
+                            $data['submit']['label'] = $button->data['main']['label'];
+                        }
                         $ionsubmissionhtml = $mobileformbuilder::submission_form_submitted();
                     } else {
                         if ($customformuserdata !== false) {
@@ -166,18 +171,31 @@ class mobile {
                 break;
             case MOD_BOOKING_BO_COND_BOOKITBUTTON:
             case MOD_BOOKING_BO_COND_CONFIRMBOOKIT:
-                $data['submit']['label']
-                    = $description;
+                if (isset($button->data['main']['label'])) {
+                    if (!isset($data['submit'])) {
+                        $data['submit'] = [];
+                    }
+                    $data['submit']['label'] = $description;
+                }
                 break;
             case MOD_BOOKING_BO_COND_PRICEISSET:
                 $price = price::get_price('option', $settings->id);
+                if (!isset($data['nosubmit'])) {
+                    $data['nosubmit'] = [];
+                }
                 $data['nosubmit']['label'] = format_float($price['price'], 2) . " " . $price['currency'];
                 break;
             case MOD_BOOKING_BO_COND_BOOKINGPOLICY:
+                if (!isset($data['nosubmit'])) {
+                    $data['nosubmit'] = [];
+                }
                 $data['nosubmit']['label'] = get_string('notbookable', 'mod_booking');
                 break;
             case MOD_BOOKING_BO_COND_ALREADYBOOKED:
             case MOD_BOOKING_BO_COND_CONFIRMCANCEL:
+                if (!isset($data['nosubmit'])) {
+                    $data['nosubmit'] = [];
+                }
                 $data['nosubmit']['label'] = get_string('booked', 'mod_booking');
                 $cancellabel = $id == MOD_BOOKING_BO_COND_ALREADYBOOKED ? get_string('cancelmyself', 'mod_booking') : $description;
                 self::render_course_button($data);
@@ -196,30 +214,37 @@ class mobile {
                 }
                 break;
             default:
+                if (!isset($data['nosubmit'])) {
+                    $data['nosubmit'] = [];
+                }
                 $data['nosubmit']['label']
                     = !empty($description) ? $description : get_string('notbookable', 'mod_booking');
                 break;
         }
 
         $teachers = [];
-        foreach ($data['teachers'] as $teacher) {
-            if (
-                get_config('booking', 'teachersshowemails')
-                || (
-                    get_config('booking', 'bookedteachersshowemails')
-                    && ($id == MOD_BOOKING_BO_COND_ALREADYBOOKED)
-                )
-            ) {
-                $teacher->email = str_replace('@', '&#64;', $teacher->email);
-            } else {
-                $teacher->email = false;
-            }
+        if (isset($data['teachers']) && is_array($data['teachers'])) {
+            foreach ($data['teachers'] as $teacher) {
+                if (
+                    get_config('booking', 'teachersshowemails')
+                    || (
+                        get_config('booking', 'bookedteachersshowemails')
+                        && ($id == MOD_BOOKING_BO_COND_ALREADYBOOKED)
+                    )
+                ) {
+                    $teacher->email = str_replace('@', '&#64;', $teacher->email);
+                } else {
+                    $teacher->email = false;
+                }
 
-            $teachers[] = (array)$teacher;
+                $teachers[] = (array)$teacher;
+            }
         }
         $data['teachers'] = $teachers;
 
-        self::format_description($data['description']);
+        if (isset($data['description'])) {
+            self::format_description($data['description']);
+        }
         $detailhtml = $OUTPUT->render_from_template('mod_booking/mobile/mobile_booking_option_details', $data);
         return [
             'templates' => [
@@ -347,11 +372,27 @@ class mobile {
      * @return array
      */
     private static function sanitize_list_data($data) {
-        $data['title'] ??= '';
-        $data['text'] ??= '';
+        $data['title'] = (string)($data['title'] ?? '');
+        $data['text'] = (string)($data['text'] ?? '');
 
-        $data['sessions'] ??= [];
-        $data['collapsedsessions'] ??= [];
+        $data['sessions'] = $data['sessions'] ?? [];
+        $data['collapsedsessions'] = $data['collapsedsessions'] ?? [];
+
+        if (!empty($data['sessions']) && is_array($data['sessions'])) {
+            foreach ($data['sessions'] as &$session) {
+                $session = (array)$session;
+                $session['concatinatedstartendtime'] = $session['concatinatedstartendtime'] ?? '';
+            }
+            unset($session);
+        }
+        if (!empty($data['collapsedsessions']) && is_array($data['collapsedsessions'])) {
+            foreach ($data['collapsedsessions'] as &$session) {
+                $session = (array)$session;
+                $session['coursestarttime'] = $session['coursestarttime'] ?? ($data['coursestarttime'] ?? '');
+                $session['courseendtime'] = $session['courseendtime'] ?? ($data['courseendtime'] ?? '');
+            }
+            unset($session);
+        }
 
         $data['hassessions'] = !empty($data['sessions']);
         $data['hascollapsedsessions'] = !empty($data['collapsedsessions']);
@@ -363,8 +404,12 @@ class mobile {
             'currency' => $data['currency'] ?? '',
         ] : null;
 
-        $data['itemid'] ??= 0;
-        $data['userid'] ??= 0;
+        $data['concatinatedstartendtime'] = $data['concatinatedstartendtime'] ?? '';
+        $data['coursestarttime'] = $data['coursestarttime'] ?? '';
+        $data['courseendtime'] = $data['courseendtime'] ?? '';
+
+        $data['itemid'] = $data['itemid'] ?? null;
+        $data['userid'] = isset($data['userid']) ? (int)$data['userid'] : 0;
         return $data;
     }
 
@@ -587,6 +632,7 @@ class mobile {
             foreach ($navtabs as $navtab) {
                 if (
                     !empty($navtab) &&
+                    !empty($navlabelnames[$navtab]) &&
                     self::get_available_booking_options($navtab, $cmid)
                 ) {
                     $selectednavlabelnames[] = [

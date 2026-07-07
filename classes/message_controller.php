@@ -28,7 +28,6 @@ use core\message\message;
 use mod_booking\booking_option;
 use mod_booking\booking_settings;
 use mod_booking\booking_option_settings;
-use mod_booking\output\optiondates_only;
 use mod_booking\output\bookingoption_changes;
 use mod_booking\output\renderer;
 use mod_booking\placeholders\placeholders_info;
@@ -131,6 +130,12 @@ class message_controller {
 
     /** @var bool $preventsendingmessage certain unresolved placeholders prevent the sending of messages.*/
     private $preventsendingmessage = false;
+
+    /** @var string $customattachment filesystem path to a custom attachment (temporary). */
+    private string $customattachment = '';
+
+    /** @var string $customattachmentname display filename for the custom attachment. */
+    private string $customattachmentname = '';
 
     /**
      * Constructor
@@ -411,11 +416,14 @@ class message_controller {
 
         $messagedata = new message();
 
-        // If a valid booking manager was set, use booking manager as sender, else global $USER will be set.
-        if (!empty($this->bookingmanager)) {
+        // If a valid booking manager was set, use booking manager as sender.
+        // Fall back to $USER if available (non-cron context), or noreply user (e.g. in adhoc task / cron).
+        if (!empty($this->bookingmanager->id)) {
             $messagedata->userfrom = $this->bookingmanager;
-        } else {
+        } else if (!empty($USER->id)) {
             $messagedata->userfrom = $USER;
+        } else {
+            $messagedata->userfrom = \core_user::get_noreply_user();
         }
         $messagedata->userto = $this->user;
         $messagedata->modulename = 'booking';
@@ -449,11 +457,14 @@ class message_controller {
 
         $messagedata = new stdClass();
 
-        // If a valid booking manager was set, use booking manager as sender, else global $USER will be set.
-        if (!empty($this->bookingmanager)) {
+        // If a valid booking manager was set, use booking manager as sender.
+        // Fall back to $USER if available (non-cron context), or noreply user (e.g. in adhoc task / cron).
+        if (!empty($this->bookingmanager->id)) {
             $messagedata->userfrom = $this->bookingmanager;
-        } else {
+        } else if (!empty($USER->id)) {
             $messagedata->userfrom = $USER;
+        } else {
+            $messagedata->userfrom = \core_user::get_noreply_user();
         }
 
         $messagedata->modulename = 'booking';
@@ -607,7 +618,54 @@ class message_controller {
                         }
                     }
                 }
+                // If a custom attachment was provided via set_custom_attachment(), store it as a stored_file.
+                $customstoredfile = null;
+                if (!empty($this->customattachment) && file_exists($this->customattachment)) {
+                    try {
+                        $fs = get_file_storage();
+                        $context = context_system::instance();
+                        $itemid = $this->messagedata->userto->id ?? 0;
 
+                        // Remove any existing file to avoid duplicate key violations.
+                        $existing = $fs->get_file(
+                            $context->id,
+                            'mod_booking',
+                            'message_attachments',
+                            $itemid,
+                            '/',
+                            $this->customattachmentname
+                        );
+                        if ($existing) {
+                            $existing->delete();
+                        }
+
+                        $filerecord = [
+                            'contextid' => $context->id,
+                            'component' => 'mod_booking',
+                            'filearea'  => 'message_attachments',
+                            'itemid'    => $itemid,
+                            'filepath'  => '/',
+                            'filename'  => $this->customattachmentname,
+                            'userid'    => $this->messagedata->userto->id,
+                        ];
+                        $customstoredfile = $fs->create_file_from_pathname($filerecord, $this->customattachment);
+                        $this->messagedata->attachment = $customstoredfile;
+                        $this->messagedata->attachname = $this->customattachmentname;
+                    } catch (Throwable $e) {
+                        if (get_config('booking', 'bookingdebugmode')) {
+                            $event = booking_debug::create([
+                                'objectid' => $this->optionid,
+                                'context' => context_system::instance(),
+                                'relateduserid' => $this->messagedata->userto->id,
+                                'other' => [
+                                    'systemmessage' => 'Custom attachment could not be stored.',
+                                    'exceptionerrormessage' => $e->getMessage(),
+                                ],
+                            ]);
+                            $event->trigger();
+                        }
+                    }
+                }
                 // Check if checked: Use a non-native mailer instead of Moodle’s built-in one.
                 $nonnativemailer = get_config('booking', 'usenonnativemailer');
                 if (
@@ -638,12 +696,22 @@ class message_controller {
                             // Do nothing.
                         }
                     }
+                    if (!PHPUNIT_TEST && isset($customstoredfile)) {
+                        try {
+                            $customstoredfile->delete();
+                        // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
+                        } catch (Throwable $e) {
+                            // Do nothing.
+                        }
+                    }
 
                     // Use an event to log that a message has been sent.
                     $event = \mod_booking\event\message_sent::create([
                         'context' => context_system::instance(),
-                        'userid' => $this->messagedata->userto->id,
-                        'relateduserid' => $this->messagedata->userfrom->id,
+                        // Userid is the user who triggered/sent the message (actor),
+                        // relateduserid is the user the message is sent to (receiver).
+                        'userid' => $this->messagedata->userfrom->id,
+                        'relateduserid' => $this->messagedata->userto->id,
                         'objectid' => $this->optionid ?? 0,
                         'other' => [
                             'messageparam' => $this->messageparam,
@@ -726,25 +794,33 @@ class message_controller {
         $attachments = null;
         $attachname = '';
 
+        if (!empty($this->rulejson)) {
+            $ruleobject = json_decode($this->rulejson);
+            if (empty($ruleobject->actiondata->sendical) || $ruleobject->actiondata->sendical != 1) {
+                // If the rule does not have sendical set, we return here.
+                return [$attachments, $attachname];
+            }
+        }
+
         if (
             $this->messageparam == MOD_BOOKING_MSGPARAM_CANCELLED_BY_PARTICIPANT
             || $this->messageparam == MOD_BOOKING_MSGPARAM_CANCELLED_BY_TEACHER_OR_SYSTEM
+            // If sent by rule and ical action is cancel.
+            || ($this->messageparam == MOD_BOOKING_MSGPARAM_CUSTOM_MESSAGE
+                && !empty($ruleobject->actiondata->sendicalcreateorcancel)
+                && $ruleobject->actiondata->sendicalcreateorcancel == 'cancel')
         ) {
-            // Check if setting to send a cancel ical is enabled.
-            if (get_config('booking', 'icalcancel')) {
-                $ical = new ical($this->bookingsettings, $this->optionsettings, $this->user, $this->bookingmanager, false);
-                $this->ical = $ical;
-                $attachments = $ical->get_attachments(true);
-                $attachname = $ical->get_name();
-            }
+            // Generate ical attachment cancelling the event.
+            $ical = new ical($this->bookingsettings, $this->optionsettings, $this->user, $this->bookingmanager, false);
+            $this->ical = $ical;
+            $attachments = $ical->get_attachments(true); // True means it's an ical that cancels the event!
+            $attachname = $ical->get_name();
         } else {
-            // Generate ical attachments to go with the message. Check if ical attachments enabled.
-            if (get_config('booking', 'attachical')) {
-                $ical = new ical($this->bookingsettings, $this->optionsettings, $this->user, $this->bookingmanager, $updated);
-                $this->ical = $ical;
-                $attachments = $ical->get_attachments($updated);
-                $attachname = $ical->get_name();
-            }
+            // Generate ical attachments to go with the message.
+            $ical = new ical($this->bookingsettings, $this->optionsettings, $this->user, $this->bookingmanager, $updated);
+            $this->ical = $ical;
+            $attachments = $ical->get_attachments(false); // False means normal creation of ical.
+            $attachname = $ical->get_name();
         }
 
         return [$attachments, $attachname];
@@ -757,6 +833,20 @@ class message_controller {
     public function get_messagebody(): string {
 
         return $this->messagebody;
+    }
+
+    /**
+     * Set a custom attachment to be included in the email.
+     * The file at $filepath will be stored as a stored_file for sending and deleted afterwards.
+     * This establishes a generic base for attachment sending across all mail types (booking rules etc.).
+     *
+     * @param string $filepath absolute filesystem path to the attachment file
+     * @param string $filename display filename for the attachment
+     * @return void
+     */
+    public function set_custom_attachment(string $filepath, string $filename): void {
+        $this->customattachment = $filepath;
+        $this->customattachmentname = $filename;
     }
 
     /**

@@ -26,6 +26,7 @@
 use mod_booking\bo_availability\conditions\customform;
 use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_option;
+use mod_booking\local\certificate_conditions\certificate_conditions;
 use mod_booking\option\fields\sharedplaces;
 use mod_booking\output\booked_users;
 use mod_booking\output\eventslist;
@@ -229,14 +230,6 @@ if ($action == 'downloadchecklist') {
     $pdf = new mod_booking\checklist\checklist_generator($bookingoption);
     $pdf->generate_pdf();
     die();
-}
-
-if (
-    $action == 'copytotemplate' && has_capability('mod/booking:manageoptiontemplates', $context) &&
-         confirm_sesskey()
-) {
-    $bookingoption->copytotemplate();
-    redirect($baseurl, get_string('copytotemplatesucesfull', 'booking'), 5);
 }
 
 if (
@@ -602,7 +595,8 @@ if (!$tableallbookings->is_downloading()) {
     $headers = [];
 
     $columns[] = 'selected';
-    $headers[] = '<input type="checkbox" id="usercheckboxall" name="selectall" value="0" />';
+    $headers[] = '<input type="checkbox" id="usercheckboxall" name="selectall" value="0" aria-label="' .
+        s(get_string('selectallusers', 'mod_booking')) . '" />';
 
     $responsesfields = explode(',', $bookingoption->booking->settings->responsesfields);
     [$addquoted, $addquotedparams] = $DB->get_in_or_equal($responsesfields);
@@ -614,6 +608,33 @@ if (!$tableallbookings->is_downloading()) {
         'id',
         'id, shortname, name'
     );
+
+    $optionhascertificate = !empty(booking_option::get_value_of_json_by_key($optionid, 'certificate'));
+    $optionistargetedbycondition = certificate_conditions::option_is_targeted_by_condition((int)$optionid);
+    $optionhasissuedcertificates = false;
+    if (class_exists('tool_certificate\certificate')) {
+        $databasetype = $DB->get_dbfamily();
+        switch ($databasetype) {
+            case 'postgres':
+                $existssql = "
+                    SELECT 1
+                      FROM {tool_certificate_issues} tci
+                     WHERE (tci.data::jsonb ->> 'bookingoptionid') ~ '^[0-9]+$'
+                       AND (tci.data::jsonb ->> 'bookingoptionid')::int = :optionid
+                ";
+                $optionhasissuedcertificates = $DB->record_exists_sql($existssql, ['optionid' => (int)$optionid]);
+                break;
+            case 'mysql':
+                $existssql = "
+                    SELECT 1
+                      FROM {tool_certificate_issues} tci
+                     WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(tci.data, '$.bookingoptionid')) AS UNSIGNED) = :optionid
+                ";
+                $optionhasissuedcertificates = $DB->record_exists_sql($existssql, ['optionid' => (int)$optionid]);
+                break;
+        }
+    }
+    $showcertificatecolumns = $optionhascertificate || $optionistargetedbycondition || $optionhasissuedcertificates;
 
     foreach ($responsesfields as $value) {
         switch ($value) {
@@ -697,16 +718,20 @@ if (!$tableallbookings->is_downloading()) {
                 $headers[] = get_string('email', 'mod_booking');
                 break;
             case 'certificate':
-                if (booking_option::get_value_of_json_by_key($optionid, 'certificate')) {
+                if ($showcertificatecolumns) {
                     $headers[] = get_string('certificatecolheader', 'mod_booking');
                     $columns[] = 'certificate';
                 }
                 break;
             case 'allusercertificates':
-                if (booking_option::get_value_of_json_by_key($optionid, 'certificate')) {
+                if ($showcertificatecolumns) {
                     $headers[] = get_string('allusercertificates', 'mod_booking');
                     $columns[] = 'allusercertificates';
                 }
+                break;
+            case 'completeddate':
+                $headers[] = get_string('completeddate', component: 'mod_booking');
+                $columns[] = 'completeddate';
                 break;
         }
     }
@@ -738,6 +763,23 @@ if (!$tableallbookings->is_downloading()) {
         $columns[] = 'formfield_' . $counter;
         $headers[] = format_string($label);
         $tableallbookings->no_sorting('formfield_' . $counter);
+    }
+
+    if (booking_option::get_value_of_json_by_key($optionid, 'slot_enabled')) {
+        $columns[] = 'slotstarttime';
+        $headers[] = get_string('starttime', 'mod_booking');
+        $columns[] = 'slotendtime';
+        $headers[] = get_string('endtime', 'mod_booking');
+        $columns[] = 'slotnumslots';
+        $headers[] = get_string('slot_report_numslots', 'mod_booking');
+        $columns[] = 'slotteachers';
+        $headers[] = get_string('slot_report_teachers', 'mod_booking');
+        $columns[] = 'slotprice';
+        $headers[] = get_string('slot_report_price', 'mod_booking');
+        if (has_capability('mod/booking:updatebooking', $context)) {
+            $columns[] = 'moveslot';
+            $headers[] = get_string('slot_move_action', 'mod_booking');
+        }
     }
 
     $strbooking = get_string("modulename", "booking");
@@ -799,7 +841,6 @@ if (!$tableallbookings->is_downloading()) {
                                 'id', tci.id,
                                 'code', tci.code,
                                 'expires', tci.expires,
-                                'data', data,
                                 'timecreated', timecreated
                             )
                         ) AS certificate
@@ -822,7 +863,6 @@ if (!$tableallbookings->is_downloading()) {
                                     'id', tci.id,
                                     'code', tci.code,
                                     'expires', tci.expires,
-                                    'data', tci.data,
                                     'timecreated', tci.timecreated
                                 )
                             ) AS certificate
@@ -855,7 +895,11 @@ if (!$tableallbookings->is_downloading()) {
             ba.userid,
             ba.waitinglist,
             ba.notes,
+            ba.startdate,
+            ba.enddate,
+            ba.json,
             ba.places,
+            ba.completeddate,
             \'\' otheroptions,
             ba.numrec' . $customfields . $shoppingcartfields . $certificatefields;
     $from = ' {booking_answers} ba
@@ -963,7 +1007,13 @@ if (!$tableallbookings->is_downloading()) {
     // Action buttons on top.
     $actionbuttonstop = '';
 
+    // Slot booking options manage their participants per slot, so users cannot be
+    // booked here directly. The "book other users" button is therefore hidden.
+    $isslotoption = (int)($bookingoption->option->type ?? MOD_BOOKING_OPTIONTYPE_DEFAULT)
+        === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING;
+
     if (
+        !$isslotoption &&
         has_capability('mod/booking:bookforothers', $context) &&
                 (has_capability('mod/booking:subscribeusers', $context) ||
                 $isteacherofthisoption)
@@ -992,6 +1042,57 @@ if (!$tableallbookings->is_downloading()) {
                     get_string('sendmailtoallbookedusers', 'booking'), ['class' => 'btn btn-primary btn-sm me-2']) .
             "</span>";
         }
+    }
+
+    if (
+        $isslotoption && (
+            $isteacherofthisoption
+            || is_siteadmin()
+            || has_capability('mod/booking:manageslotunavailability', $context)
+            || has_capability('mod/booking:updatebooking', $context)
+        )
+    ) {
+        $teacherunavailabilityurl = new moodle_url('/mod/booking/teacherunavailability.php', [
+            'id' => $cm->id,
+            'optionid' => $optionid,
+            'scopeoptionid' => 0,
+        ]);
+        $actionbuttonstop .= "<span>" .
+            html_writer::link(
+                $teacherunavailabilityurl,
+                '<i class="fa fa-calendar-times-o fa-fw" aria-hidden="true"></i>&nbsp;' .
+                get_string('slot_teacher_unavailability', 'mod_booking'),
+                ['class' => 'btn btn-primary btn-sm me-2']
+            ) .
+        "</span>";
+    }
+
+    if ($isslotoption) {
+        $slotteacherassignmenturl = new moodle_url('/mod/booking/slotteacherassignments.php', [
+            'id' => $cm->id,
+            'optionid' => $optionid,
+        ]);
+        $actionbuttonstop .= "<span>" .
+            html_writer::link(
+                $slotteacherassignmenturl,
+                '<i class="fa fa-users fa-fw" aria-hidden="true"></i>&nbsp;' .
+                get_string('slot_student_teacher_assignments', 'mod_booking'),
+                ['class' => 'btn btn-primary btn-sm me-2']
+            ) .
+        "</span>";
+
+        $slotcalendarurl = new moodle_url('/mod/booking/slotcalendar.php', [
+            'id' => $cm->id,
+            'optionid' => $optionid,
+        ]);
+        $actionbuttonstop .= "<span>" .
+            html_writer::link(
+                $slotcalendarurl,
+                '<i class="fa fa-calendar fa-fw" aria-hidden="true"></i>&nbsp;' .
+                get_string('slot_calendar_title', 'mod_booking'),
+                ['class' => 'btn btn-primary btn-sm me-2']
+            ) .
+        "</span>";
     }
 
     // Button to download signin sheet.
@@ -1255,7 +1356,20 @@ if (!$tableallbookings->is_downloading()) {
 
     // Messages can only be view by users with viewreports permission.
     if (has_capability('mod/booking:viewreports', $context)) {
-        $eventslist = new eventslist($optionid, ['\mod_booking\event\message_sent']);
+        // For the messages report show the recipient (relateduserid) instead of the generic "user"
+        // column, so it is unambiguous who each message was sent to (the sender is in the description).
+        $messagecolumns = [
+            'relateduserid' => get_string('messagerecipient', 'mod_booking'),
+            'eventname' => get_string('eventname', 'core'),
+            'description' => get_string('description', 'core'),
+            'timecreated' => get_string('timecreated', 'core'),
+        ];
+        $eventslist = new eventslist(
+            $optionid,
+            ['\mod_booking\event\message_sent'],
+            'messagescountlabel',
+            $messagecolumns
+        );
         $eventslist->icon = 'fa fa-envelope-o';
         $eventslist->title = get_string('showmessages', 'mod_booking');
         echo $OUTPUT->render_from_template('mod_booking/eventslist', (array) $eventslist);
@@ -1263,7 +1377,11 @@ if (!$tableallbookings->is_downloading()) {
 
     // We call the template render to display how many users are in previously booked list.
     $data = new booked_users('option', $optionid, false, false, false, false, false, false, false, true);
-    $previouslybooked = $renderer->render_booked_users($data);
+    if (!empty($data->previouslybooked)) {
+        $previouslybooked = $renderer->render_booked_users($data);
+    } else {
+        $previouslybooked = '';
+    }
 
     if (!empty($previouslybooked)) {
         $contents = html_writer::tag(
@@ -1352,6 +1470,23 @@ if (!$tableallbookings->is_downloading()) {
         $headers[] = !empty($customformfield->label) ? $customformfield->label : 'label_' . $counter;
     }
 
+    if (booking_option::get_value_of_json_by_key($optionid, 'slot_enabled')) {
+        $columns[] = 'slotstarttime';
+        $headers[] = get_string('starttime', 'mod_booking');
+        $columns[] = 'slotendtime';
+        $headers[] = get_string('endtime', 'mod_booking');
+        $columns[] = 'slotnumslots';
+        $headers[] = get_string('slot_report_numslots', 'mod_booking');
+        $columns[] = 'slotteachers';
+        $headers[] = get_string('slot_report_teachers', 'mod_booking');
+        $columns[] = 'slotprice';
+        $headers[] = get_string('slot_report_price', 'mod_booking');
+        if (has_capability('mod/booking:updatebooking', $context)) {
+            $columns[] = 'moveslot';
+            $headers[] = get_string('slot_move_action', 'mod_booking');
+        }
+    }
+
     if (
         groups_get_activity_groupmode($cm) == SEPARATEGROUPS &&
             !has_capability('moodle/site:accessallgroups', \context_course::instance($course->id))
@@ -1411,6 +1546,9 @@ if (!$tableallbookings->is_downloading()) {
                     ba.waitinglist AS waitinglist,
                     ba.status,
                     ba.notes,
+                    ba.startdate,
+                    ba.enddate,
+                    ba.json,
                     ba.places,
                     ba.timecreated,
                     u.idnumber as idnumber

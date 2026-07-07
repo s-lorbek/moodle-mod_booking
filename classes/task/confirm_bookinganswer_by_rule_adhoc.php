@@ -50,7 +50,7 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
      * @throws \coding_exception
      */
     public function get_name() {
-        return get_string('tasksendmailbyruleadhoc', 'mod_booking');
+        return get_string('taskconfirmbookinganswerbymailbyruleadhoc', 'mod_booking');
     }
 
     /**
@@ -137,14 +137,32 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
                     'userid' => $taskdata->userid,
                     'waitinglist' => MOD_BOOKING_STATUSPARAM_WAITINGLIST,
                 ]);
+                if (empty($bookinganswer)) {
+                    mtrace(
+                        'confirm_bookinganswer_by_rule_adhoc task: No booking answer found for option '
+                        . $taskdata->optionid . ' and user ' . $taskdata->userid
+                    );
+                    return;
+                }
+                if ($bookinganswer->waitinglist != MOD_BOOKING_STATUSPARAM_WAITINGLIST) {
+                    mtrace(
+                        'confirm_bookinganswer_by_rule_adhoc task: booking answer is not on waiting list anymore for option '
+                        . $taskdata->optionid . ' and user ' . $taskdata->userid . PHP_EOL . 'current status is: '
+                        . $bookinganswer->waitinglist
+                    );
+                    return;
+                }
 
                 $user = singleton_service::get_instance_of_user($taskdata->userid);
                 // Get the price for the user.
                 // Sometimes the option is free for the user even when the option has a price (userprice = 1).
                 // In this case, the option should be booked automatically for the user.
+                // get_price() can return an array WITHOUT a 'price' key (no price records,
+                // or no matching price category and no default fallback) — treat that like
+                // price 0 (previous implicit PHP behaviour, now without the warning).
                 $userprice = \mod_booking\price::get_price('option', $optionsettings->id, $user);
 
-                if ($optionsettings->jsonobject->useprice == 0 || $userprice['price'] == 0) {
+                if ($optionsettings->jsonobject->useprice == 0 || ($userprice['price'] ?? 0) == 0) {
                     $option = singleton_service::get_instance_of_booking_option($optionsettings->cmid, $optionsettings->id);
                     $option->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
                 } else {
@@ -163,10 +181,10 @@ class confirm_bookinganswer_by_rule_adhoc extends \core\task\adhoc_task {
                         MOD_BOOKING_STATUSPARAM_WAITINGLIST_CONFIRMED
                     );
 
-                    // Set json to null for all other users on waiting list for this optuion
+                    // Set json to null for all other users on waiting list for this option
                     // in booking answer records if confirmationonnotification is equal to 2.
                     if ($optionsettings->confirmationonnotification == 2) {
-                        // Get sprecific booking answer record.
+                        // Get all other WL users and un-confirm them (exclusive-confirmation mode).
                         $bookinganswers = $DB->get_records('booking_answers', [
                             'optionid' => $taskdata->optionid,
                             'waitinglist' => MOD_BOOKING_STATUSPARAM_WAITINGLIST,

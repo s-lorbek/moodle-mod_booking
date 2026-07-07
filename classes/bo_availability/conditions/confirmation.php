@@ -81,6 +81,25 @@ class confirmation implements bo_condition {
     }
 
     /**
+     * Returns the name of the condition.
+     *
+     * @return string
+     *
+     */
+    public function get_name(): string {
+        return get_string('bocondconfirmation', 'mod_booking');
+    }
+
+    /**
+     * Returns whether the condition is skippable or not.
+     *
+     * @return bool
+     */
+    public function is_skippable(): bool {
+        return false;
+    }
+
+    /**
      * Determines whether a particular item is currently available
      * according to this availability condition.
      * @param booking_option_settings $settings Item we're checking
@@ -101,9 +120,10 @@ class confirmation implements bo_condition {
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
      * @param int $userid
+     * @param array $params This is the array with parameters for the sql query.
      * @return array
      */
-    public function return_sql(int $userid = 0): array {
+    public function return_sql(int $userid = 0, &$params = []): array {
 
         return ['', '', '', [], ''];
     }
@@ -191,19 +211,22 @@ class confirmation implements bo_condition {
         $data = new bookingoption_description($optionid, null, MOD_BOOKING_DESCRIPTION_WEBSITE, true, false);
         $bodata = $data->get_returnarray();
 
-        switch ($lastresultid) {
-            case MOD_BOOKING_BO_COND_ALREADYBOOKED:
-                $bodata['alreadybooked'] = true;
-                break;
-            case MOD_BOOKING_BO_COND_ALREADYRESERVED:
-                $bodata['alreadyreserved'] = true;
-                break;
-            case MOD_BOOKING_BO_COND_ONWAITINGLIST:
-                $bodata['onwaitinglist'] = true;
-                break;
-            default:
-                $bodata['notyetbooked'] = true;
-                break;
+        // A booked-state top blocker (incl. SLOTMOVE, which only blocks for an actually-booked,
+        // self-rebookable user) means the booking succeeded — otherwise the user sees a false error.
+        if (in_array($lastresultid, MOD_BOOKING_BO_COND_BOOKED_STATES, true)) {
+            $bodata['alreadybooked'] = true;
+        } else {
+            switch ($lastresultid) {
+                case MOD_BOOKING_BO_COND_ALREADYRESERVED:
+                    $bodata['alreadyreserved'] = true;
+                    break;
+                case MOD_BOOKING_BO_COND_ONWAITINGLIST:
+                    $bodata['onwaitinglist'] = true;
+                    break;
+                default:
+                    $bodata['notyetbooked'] = true;
+                    break;
+            }
         }
 
         $dataarray[] = [

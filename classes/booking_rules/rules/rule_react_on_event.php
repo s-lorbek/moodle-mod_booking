@@ -117,6 +117,9 @@ class rule_react_on_event implements booking_rule {
         $allowedeventkeys = [
             'bookingoption_freetobookagain',
             'bookinganswer_cancelled',
+            'bookinganswer_slotbooked',
+            'bookinganswer_slotmoved',
+            'bookinganswer_slotcancelled',
             'bookingoption_booked',
             'bookingoptionwaitinglist_booked',
             'bookinganswer_movedupfromwaitinglist',
@@ -134,6 +137,7 @@ class rule_react_on_event implements booking_rule {
             'rest_script_success',
             'enrollink_triggered',
             'bookingoption_bookedviaautoenrol',
+            'certificate_issued',
         ];
 
         // Get a list of all booking events.
@@ -559,6 +563,9 @@ class rule_react_on_event implements booking_rule {
 
         $condition = conditions_info::get_condition($jsonobject->conditionname);
 
+        if (empty($condition)) {
+            return [];
+        }
         $condition->set_conditiondata_from_json($this->rulejson);
 
         $condition->execute($sql, $params);

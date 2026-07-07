@@ -28,6 +28,7 @@ use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_option_settings;
 use mod_booking\local\modechecker;
+use mod_booking\option\fields\multiplebookings;
 use mod_booking\singleton_service;
 use moodle_url;
 use MoodleQuickForm;
@@ -78,6 +79,24 @@ class alreadybooked implements bo_condition {
     public function is_shown_in_mform(): bool {
         return false;
     }
+    /**
+     * Returns the name of the condition.
+     *
+     * @return string
+     *
+     */
+    public function get_name(): string {
+        return get_string('bocondalreadybooked', 'mod_booking');
+    }
+
+    /**
+     * Returns whether the condition is skippable or not.
+     *
+     * @return bool
+     */
+    public function is_skippable(): bool {
+        return false;
+    }
 
     /**
      * Determines whether a particular item is currently available
@@ -106,14 +125,10 @@ class alreadybooked implements bo_condition {
         $allanswers = $bookinganswer->get_users();
         $currentanswer = $allanswers[$userid] ?? null;
 
-        // Get the real booking time.
-        $timebooked = (int) (empty($currentanswer) ) ? 0 : $currentanswer->timebooked;
-
-        // Check if multiple bookings are enabled and if the required time to wait before
-        // the next book is passed, then this condition does not blocks.
-        $ismultipbookingsoptionenable = $settings->jsonobject->multiplebookings ?? 0;
-        $allowtobookagainafter = $settings->jsonobject->allowtobookagainafter ?? 0;
-        if ($ismultipbookingsoptionenable && ($timebooked + $allowtobookagainafter) <= time()) {
+        // If multiple bookings are enabled and the book-again gate (fixed wait time or the last
+        // booked slot having ended) is satisfied for the user's booked answer, this condition
+        // does not block.
+        if (!empty($currentanswer) && multiplebookings::book_again_due($settings->id, $currentanswer)) {
             $isavailable = true;
         }
 
@@ -130,9 +145,10 @@ class alreadybooked implements bo_condition {
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
      * @param int $userid
+     * @param array $params This is the array with parameters for the sql query.
      * @return array
      */
-    public function return_sql(int $userid = 0): array {
+    public function return_sql(int $userid = 0, &$params = []): array {
 
         return ['', '', '', [], ''];
     }
@@ -178,6 +194,16 @@ class alreadybooked implements bo_condition {
         $isavailable = $this->is_available($settings, $userid, $not);
 
         $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
+
+        // When self-service slot rebooking is available for this booked user, the slotmove
+        // condition (higher id) owns the button + prepage. alreadybooked steps back to INDIFFERENT
+        // so its JUSTMYALERT does not suppress the move prepage modal.
+        if (
+            !$isavailable
+            && \mod_booking\local\slotbooking\slot_mover::get_self_rebookable_answer((int)$settings->id, (int)$userid) !== null
+        ) {
+            return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_INDIFFERENT];
+        }
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_JUSTMYALERT];
     }
@@ -267,7 +293,7 @@ class alreadybooked implements bo_condition {
      * @param booking_option_settings $settings
      * @return string
      */
-    private function get_description_string(bool $isavailable, bool $full, booking_option_settings $settings) {
+    public function get_description_string(bool $isavailable, bool $full, booking_option_settings $settings) {
 
         if (
             !$isavailable

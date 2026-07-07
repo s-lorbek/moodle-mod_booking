@@ -200,12 +200,15 @@ class booking {
             '\' \''
         );
 
+        // We do not load any deleted, suspended or unconfirmed users.
         $sql = "SELECT * FROM (
                     SELECT u.id, u.firstname, u.lastname, u.email, $fullsql AS fulltextstring
-                    FROM {user} u
-                    WHERE u.deleted = 0
+                      FROM {user} u
+                     WHERE u.deleted = 0
+                       AND u.suspended = 0
+                       AND u.confirmed = 1
                 ) AS fulltexttable";
-        // Check for u.deleted = 0 is important, so we do not load any deleted users!
+
         $params = [];
         if (!empty($query)) {
             // We search for every word extra to get better results.
@@ -257,33 +260,39 @@ class booking {
     public static function load_courses(string $query) {
         global $DB;
 
-        $totalcount = 1;
-
-        $allcourses = get_courses_search(
-            [],
-            'c.fullname ASC',
-            0,
-            9999999,
-            $totalcount,
-            ['enrol/manual:enrol']
-        );
-        $allcourseids = [];
-        foreach ($allcourses as $id => $courseobject) {
-            $allcourseids[] = $id;
-        }
-        [$incourseids, $inparams] = $DB->get_in_or_equal($allcourseids, SQL_PARAMS_NAMED, 'inparam');
+        // Users with this capability may pick ANY course as a duplication source, including
+        // courses they cannot otherwise see or access. For everyone else we restrict the list
+        // to visible courses in which they may manually enrol.
+        $canduplicateany = has_capability('mod/booking:duplicateanycourse', \context_system::instance());
 
         $values = explode(' ', $query);
 
         $fullsql = $DB->sql_concat('\' \'', 'c.id', '\' \'', 'c.shortname', '\' \'', 'c.fullname', '\' \'');
 
+        $params = [];
+        $innerwhere = '';
+        if (!$canduplicateany) {
+            $totalcount = 1;
+            $allcourses = get_courses_search(
+                [],
+                'c.fullname ASC',
+                0,
+                9999999,
+                $totalcount,
+                ['enrol/manual:enrol']
+            );
+            $allcourseids = array_keys($allcourses);
+            [$incourseids, $inparams] = $DB->get_in_or_equal($allcourseids, SQL_PARAMS_NAMED, 'inparam');
+            // Check for c.visible = 1 is important, so we do not load any invisible courses!
+            $innerwhere = "WHERE c.visible = 1 AND c.id $incourseids";
+            $params = $inparams;
+        }
+
         $sql = "SELECT * FROM (
                     SELECT c.id, c.shortname, c.fullname, $fullsql AS fulltextstring
                     FROM {course} c
-                    WHERE c.visible = 1 AND c.id $incourseids
+                    $innerwhere
                 ) AS fulltexttable";
-        // Check for c.visible = 1 is important, so we do not load any inivisble courses!
-        $params = $inparams;
         if (!empty($query)) {
             // We search for every word extra to get better results.
             $firstrun = true;
@@ -1153,6 +1162,7 @@ class booking {
      * @param string $additionalwhere
      * @param string $innerfrom
      * @param ?wunderbyte_table $tableinstance
+     * @param int $visibilityoverridemode One of MOD_BOOKING_VISIBILITY_OVERRIDE_* constants.
      *
      * @return array
      */
@@ -1168,7 +1178,8 @@ class booking {
         $bookingparams = [MOD_BOOKING_STATUSPARAM_BOOKED],
         $additionalwhere = '',
         $innerfrom = '',
-        $tableinstance = null
+        $tableinstance = null,
+        $visibilityoverridemode = MOD_BOOKING_VISIBILITY_OVERRIDE_DEFAULT
     ) {
 
         global $DB;
@@ -1205,6 +1216,24 @@ class booking {
                 $where = " 1 = 1 ";
             } else if (!empty($userid)) {
                 $where = " invisible <> 1 ";
+            } else if (!empty($visibilityoverridemode)) {
+                // For the moment, this is used for the teacher page, where we want to show invisible options based on the settings.
+                // Teacher-page visibility override: allow assigned teachers to see non-public options
+                // based on the visibility override mode.
+                // The teacher assignment check is handled by caller-side where conditions.
+                if ($visibilityoverridemode === MOD_BOOKING_VISIBILITY_OVERRIDE_FULLYINVISIBLE) {
+                    // Mode 1: Show fully invisible options (invisible = 1) only.
+                    $where = "invisible IN (0, 1) ";
+                } else if ($visibilityoverridemode === MOD_BOOKING_VISIBILITY_OVERRIDE_DIRECTLINKONLY) {
+                    // Mode 2: Show direct-link-only options (invisible = 2) only.
+                    $where = "invisible IN (0, 2) ";
+                } else if ($visibilityoverridemode === MOD_BOOKING_VISIBILITY_OVERRIDE_BOTH) {
+                    // Mode 3: Show both fully invisible and direct-link-only options.
+                    $where = " 1 = 1 ";
+                } else {
+                    // Default or unknown mode: fall back to showing only public options.
+                    $where = "invisible = 0 ";
+                }
             } else {
                 // ... then only show visible options.
                 $where = "invisible = 0 ";
@@ -1213,6 +1242,7 @@ class booking {
             // The "Where"-clause is always added so we have to have something here for the sql to work.
             $where = "1=1 ";
         }
+
         // Add where condition for searchtext.
         if (!empty($searchtext)) {
             $where .= " AND " . $DB->sql_like("text", ":searchtext", false);
@@ -1279,7 +1309,9 @@ class booking {
         $addgroupby = preg_replace($pattern, ',', $select1 . ",");
         $groupby .= !empty($addgroupby) ? ' , ' . $addgroupby : '';
 
-        $groupby .= '';
+        // Here, $select2 (teachers) is an aggregate (sql_group_concat renders as
+        // GROUP_CONCAT on MySQL/MariaDB and STRING_AGG on PostgreSQL/MSSQL) and
+        // must never be echoed into GROUP BY, so it is intentionally not added here.
 
         $addgroupby = preg_replace($pattern, ',', $select3 . ",");
         $groupby .= !empty($addgroupby) ? ' , ' . $addgroupby : '';
@@ -1417,71 +1449,6 @@ class booking {
     }
 
     /**
-     * Genereate SQL and params array to fetch my options.
-     *
-     * @param int $limitfrom
-     * @param int $limitnum
-     * @param string $searchtext
-     * @param string $fields
-     * @param array $booked
-     * @return array
-     */
-    public function get_my_options_sql(
-        $limitfrom = 0,
-        $limitnum = 0,
-        $searchtext = '',
-        $fields = "bo.*",
-        $booked = [MOD_BOOKING_STATUSPARAM_BOOKED]
-    ) {
-
-        global $DB, $USER;
-
-        $fields = "DISTINCT " . $fields;
-
-        $limit = '';
-        $rsearch = $this->searchparameters($searchtext);
-        $search = $rsearch['query'];
-        $params = array_merge(['bookingid' => $this->id,
-                                    'userid' => $USER->id,
-                                ], $rsearch['params']);
-
-        if ($limitnum != 0) {
-            $limit = " LIMIT {$limitfrom} OFFSET {$limitnum}";
-        }
-
-        [$inorequal, $inparams] = $DB->get_in_or_equal($booked, SQL_PARAMS_NAMED);
-
-        $params = array_merge($params, $inparams);
-
-        $from = "{booking_options} bo
-                JOIN {booking_answers} ba
-                ON ba.optionid=bo.id";
-        $where = "bo.bookingid = :bookingid
-                  AND ba.userid = :userid
-                  AND ba.waitinglist = $inorequal {$search}";
-        if (strlen($searchtext) !== 0) {
-            $from .= "
-                JOIN {customfield_data} cfd
-                ON bo.id=cfd.instanceid
-                JOIN {customfield_field} cff
-                ON cfd.fieldid=cff.id
-                ";
-            // Strip column close.
-            $where = substr($where, 0, -1);
-            // Add another tag.
-            $where .= " OR {$DB->sql_like('cfd.value', ':cfsearchtext', false)}) ";
-            // In a future iteration, we can add the specification in which customfield we want to search.
-            // For From JOIN {customfield_field} cff.
-            // ON cfd.fieldid=cff.id .
-            // And for Where.
-            // AND cff.name like 'fieldname'.
-            $params['cfsearchtext'] = $searchtext;
-        }
-
-        return [$fields, $from, $where, $params];
-    }
-
-    /**
      * Helper function to encode a moodle_url with base64.
      * This can be used in combination with bookingredirect.php.
      * @param object $moodleurl
@@ -1601,7 +1568,7 @@ class booking {
                 $optiontitle,
                 $record->coursestarttime,
                 $record->courseendtime,
-                1,
+                (int)($record->status ?? 0),
                 $link,
                 $bgcolor
             );
@@ -1630,11 +1597,12 @@ class booking {
                         'optiondate' area,
                         bo.id optionid,
                         bo.text,
+                        bo.status,
                         bod.coursestarttime,
                         bod.courseendtime
                     FROM {booking_optiondates} bod
                     JOIN (
-                        SELECT id, text
+                        SELECT id, text, status
                         FROM {booking_options}
                     ) bo
                     ON bod.optionid = bo.id
@@ -1645,6 +1613,7 @@ class booking {
                     'option' area,
                     id optionid,
                     text,
+                    status,
                     coursestarttime,
                     courseendtime
                     FROM {booking_options}
@@ -1724,6 +1693,7 @@ class booking {
      * @param string $component
      * @param array $eventnames
      * @param int $objectid
+     * @param int $timecreatedfrom only include log entries created at or after this timestamp, 0 for no limit
      *
      * @return array
      *
@@ -1731,7 +1701,8 @@ class booking {
     public static function return_sql_for_event_logs(
         string $component = 'mod_booking',
         array $eventnames = [],
-        int $objectid = 0
+        int $objectid = 0,
+        int $timecreatedfrom = 0
     ) {
         global $DB;
 
@@ -1739,10 +1710,18 @@ class booking {
 
         $params = [];
 
+        // The time condition goes inside the derived table, so the DB can use
+        // the timecreated index even if it materializes the subquery.
+        $timewhere = '';
+        if (!empty($timecreatedfrom)) {
+            $timewhere = "WHERE lsl.timecreated >= :timecreatedfrom";
+        }
+
         $from = "(
                     SELECT
                     lsl.*
                     FROM {logstore_standard_log} lsl
+                    $timewhere
                 ) as s1";
 
         $where = 'component = :component ';
@@ -1751,6 +1730,10 @@ class booking {
             [$inorequal, $params] = $DB->get_in_or_equal($eventnames, SQL_PARAMS_NAMED);
 
             $where .= " AND eventname " . $inorequal;
+        }
+
+        if (!empty($timecreatedfrom)) {
+            $params['timecreatedfrom'] = $timecreatedfrom;
         }
 
         if (!empty($objectid)) {
@@ -2260,7 +2243,7 @@ class booking {
             }
 
             // 5. Check full text search columns if there are any custom fields.
-            $columns = empty($tableinstance) ? [] : array_keys($tableinstance->fulltextsearchcolumns);
+            $columns = empty($tableinstance) ? [] : $tableinstance->fulltextsearchcolumns;
             if (in_array($customfield, $columns, true)) {
                 $requiredcustomfields[] = $customfield;
             }

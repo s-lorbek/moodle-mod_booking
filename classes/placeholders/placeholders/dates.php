@@ -35,6 +35,7 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
 /**
  * Control and manage placeholders for booking instances, options and mails.
  *
+ * @package mod_booking
  * @copyright Wunderbyte GmbH <info@wunderbyte.at>
  * @author Georg Maißer
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -84,12 +85,12 @@ class dates extends \mod_booking\placeholders\placeholder_base {
             if (isset(placeholders_info::$placeholders[$cachekey])) {
                 return placeholders_info::$placeholders[$cachekey];
             }
-            /** @var renderer $output*/
+            /** @var \mod_booking\output\renderer $output*/
             $output = $PAGE->get_renderer('mod_booking');
 
-            // Render optiontimes using a template.
+            // Render optiondates using a template.
             $data = new optiondates_only($settings);
-            $value = $output->render_optiondates_for_placeholder($data);
+            $value = $output->render_optiondates_only($data);
 
             // Save the value to profit from singleton.
             placeholders_info::$placeholders[$cachekey] = $value;
