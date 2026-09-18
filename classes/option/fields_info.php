@@ -81,6 +81,10 @@ class fields_info {
                 // Execute the prepare function of every field.
                 try {
                     $returnvalue = $classname::prepare_save_field($formdata, $newoption, $updateparam);
+                } catch (\required_capability_exception $e) {
+                    // Capability violations must never be swallowed: the caller (form, web service,
+                    // importer) has to fail loudly and nothing may be persisted.
+                    throw $e;
                 } catch (\Exception $e) {
                     $error[] = $e;
                 }
@@ -283,6 +287,14 @@ class fields_info {
 
         $cmid = $data->cmid ?? $settings->cmid ?? 0;
         $context = context_module::instance($cmid);
+
+        // Without any option form profile capability there is no defined field set: the
+        // pipeline would silently drop almost every field (including the option id, which
+        // turns an update into the insert of a junk option). Fail with a clear message.
+        if (optionformconfig_info::return_capability_for_user($context->id) === '') {
+            return get_string('error:nooptionformprofile', 'mod_booking');
+        }
+
         $classes = self::get_field_classes($context->id);
 
         try {
@@ -476,6 +488,19 @@ class fields_info {
                 // If there are alternative identifiers, we have to check if one of them is present.
                 foreach ($classname::$alternativeimportidentifiers as $alternativeidentifier) {
                     if (isset($data->{$alternativeidentifier})) {
+                        return false;
+                    }
+                    // An identifier ending in '_' matches any indexed column of that family
+                    // (e.g. 'coursestarttime_' matches coursestarttime_0, coursestarttime_7, ...),
+                    // so imports using indexed date rows reach their field class regardless of
+                    // which indices the file carries.
+                    if (
+                        str_ends_with($alternativeidentifier, '_')
+                        && preg_grep(
+                            '/^' . preg_quote($alternativeidentifier, '/') . '\d+$/',
+                            array_keys((array) $data)
+                        )
+                    ) {
                         return false;
                     }
                 }

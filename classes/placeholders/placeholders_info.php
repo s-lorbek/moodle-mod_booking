@@ -49,7 +49,7 @@ class placeholders_info {
     public static array $placeholders = [];
 
     /**
-     * @var array $localizedplaceholders
+     * @var array $localizedplaceholders classname (= placeholder tag) => localized description
      */
     public static array $localizedplaceholders = [];
 
@@ -163,7 +163,7 @@ class placeholders_info {
                 }
 
                 $searchstring = '{' . $placeholder . '}';
-                $text = str_replace($searchstring, $value, $text);
+                $text = str_replace($searchstring, $value ?? '', $text);
             } else if (!empty($optionid)) {
                 // The customfields class takes care of booking custom fields...
                 // ... and custom user profile fields.
@@ -248,8 +248,8 @@ class placeholders_info {
         }
 
         $placeholders = [];
-        foreach (self::$localizedplaceholders as $key => $value) {
-            $placeholders[] = "<li data-id='$value'>{" . $value . "} " . $key . "</li>";
+        foreach (self::$localizedplaceholders as $classname => $localized) {
+            $placeholders[] = "<li data-id='$classname'>{" . $classname . "} " . $localized . "</li>";
         }
 
         $returnstring = implode('<br>', $placeholders);
@@ -257,6 +257,30 @@ class placeholders_info {
         $returnstring = html_writer::tag('ul', $returnstring, ['class' => 'booking-placeholders']);
 
         return $returnstring;
+    }
+
+    /**
+     * Drop all cached placeholder values of one booking option.
+     *
+     * The cachekeys are "$classname-$optionid", "$classname-$optionid-$userid" or
+     * "$classname-$optionid-$placeholder", so every entry whose second segment is the
+     * option id is removed. Called from singleton_service::destroy_booking_option_singleton(),
+     * so placeholders like {dates} are rendered anew after the option (e.g. its dates) changed
+     * within the same PHP process - cron runs many adhoc tasks in one process, phpunit too.
+     *
+     * @param int $optionid
+     * @return void
+     */
+    public static function purge_for_option(int $optionid): void {
+        if ($optionid <= 0) {
+            return;
+        }
+        foreach (array_keys(self::$placeholders) as $cachekey) {
+            $segments = explode('-', (string) $cachekey);
+            if (isset($segments[1]) && $segments[1] === (string) $optionid) {
+                unset(self::$placeholders[$cachekey]);
+            }
+        }
     }
 
     /**
@@ -303,11 +327,13 @@ class placeholders_info {
             $component = core_component::get_component_from_classname($key);
             $class = substr(strrchr($key, '\\'), 1);
             if (isset($specialtreatmentclasses[$class])) {
-                self::$localizedplaceholders[$specialtreatmentclasses[$class]] = $class;
+                self::$localizedplaceholders[$class] = $specialtreatmentclasses[$class];
                 continue;
             }
-            // We use the localized strings as keys and the classnames as values.
-            self::$localizedplaceholders[get_string($class, $component)] = $class;
+            // We use the classnames as keys and the localized strings as values.
+            // The classname is the actual placeholder tag, so it is guaranteed to be
+            // unique - identical translations of two placeholders must not collide.
+            self::$localizedplaceholders[$class] = get_string($class, $component);
         }
         return self::$localizedplaceholders;
     }

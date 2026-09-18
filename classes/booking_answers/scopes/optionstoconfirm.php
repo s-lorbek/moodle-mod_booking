@@ -170,7 +170,7 @@ class optionstoconfirm extends option {
         ) {
             $table->actionbuttons[] = booked_users::create_action_button(
                 'presence',
-                'fa fa-user-o',
+                'fa fa-user-o fa-fw',
                 'mod_booking\\form\\optiondates\\modal_change_status',
                 [
                     'scope' => 'option',
@@ -180,12 +180,12 @@ class optionstoconfirm extends option {
                     'cmid' => $cmid,
                     'optionid' => $optionid ?? 0,
                 ],
-                'btn btn-primary btn-sm ms-2'
+                'btn btn-primary btn-sm me-2'
             );
 
             $table->actionbuttons[] = booked_users::create_action_button(
                 'notes',
-                'fa fa-pencil',
+                'fa fa-pencil fa-fw',
                 'mod_booking\\form\\optiondates\\modal_change_notes',
                 [
                     'scope' => 'option',
@@ -194,7 +194,8 @@ class optionstoconfirm extends option {
                     'component' => 'mod_booking',
                     'cmid' => $cmid,
                     'optionid' => $optionid ?? 0,
-                ]
+                ],
+                'btn btn-primary btn-sm me-2'
             );
         }
 
@@ -214,11 +215,12 @@ class optionstoconfirm extends option {
      * This functions defines the columns for each scope.
      *
      * @param int $statusparam
+     * @param int $scopeid
      *
      * @return array
      *
      */
-    public function return_cols_for_tables(int $statusparam): array {
+    public function return_cols_for_tables(int $statusparam, int $scopeid = 0): array {
 
         $columns = [
             'text' => get_string('bookingoptionname', 'mod_booking'),
@@ -438,7 +440,7 @@ class optionstoconfirm extends option {
      *
      */
     public function show_download_button(wunderbyte_table &$table, string $scope, int $scopeid, int $statusparam) {
-        if ($this->has_capability_in_scope($scopeid, 'mod/booking:updatebooking')) {
+        if ($this->has_capability_in_scope($scopeid, 'mod/booking:downloadresponses')) {
             $baseurl = new moodle_url(
                 '/mod/booking/download_report2.php',
                 [

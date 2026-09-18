@@ -29,6 +29,7 @@ use mod_booking\booking_option_settings;
 use mod_booking\option\field_base;
 use mod_booking\option\fields_info;
 use mod_booking\option\type_resolver;
+use mod_booking\local\selflearning\selflearning_feature;
 use mod_booking\local\slotbooking\slot_feature;
 use mod_booking\singleton_service;
 use mod_booking\utils\wb_payment;
@@ -104,9 +105,11 @@ class optiontype extends field_base {
 
         $optionid = (int)($formdata['id'] ?? $formdata['optionid'] ?? 0);
         $hasslotanswers = 0;
+        $currenttype = MOD_BOOKING_OPTIONTYPE_DEFAULT;
         if ($optionid > 0) {
             $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
-            $isslotoption = (int)($settings->type ?? MOD_BOOKING_OPTIONTYPE_DEFAULT) === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING;
+            $currenttype = (int)($settings->type ?? MOD_BOOKING_OPTIONTYPE_DEFAULT);
+            $isslotoption = $currenttype === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING;
 
             if ($isslotoption) {
                 $hasslotanswers = $DB->record_exists_select(
@@ -129,14 +132,37 @@ class optiontype extends field_base {
 
         $options = [
             MOD_BOOKING_OPTIONTYPE_DEFAULT => get_string('optiontype_withdates', 'mod_booking'),
-            MOD_BOOKING_OPTIONTYPE_SELFLEARNINGCOURSE => $selflearningcourselabel,
         ];
 
-        if (slot_feature::is_enabled()) {
+        // Self-learning courses need PRO and the admin toggle. An option that already is of this
+        // type keeps it in the list even if the feature was switched off later on, so that editing
+        // such an option does not silently reset its type.
+        if (
+            selflearning_feature::is_enabled()
+            || $currenttype === MOD_BOOKING_OPTIONTYPE_SELFLEARNINGCOURSE
+        ) {
+            $options[MOD_BOOKING_OPTIONTYPE_SELFLEARNINGCOURSE] = $selflearningcourselabel;
+        }
+
+        // Same for slot booking: an option that already is a slot option keeps the type in the
+        // list, so an expired licence or a disabled toggle does not reset it behind the scenes.
+        if (
+            slot_feature::is_enabled()
+            || $currenttype === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING
+        ) {
             $options[MOD_BOOKING_OPTIONTYPE_SLOTBOOKING] = get_string('optiontype_slotbooking', 'mod_booking');
         }
 
-        $mform->addElement('select', 'optiontype', get_string('type', 'mod_booking'), $options);
+        // Only render the select when there actually is something to choose from. With neither
+        // self-learning courses nor slot booking available, the default type is the only one
+        // possible, so it is stored silently via a hidden field.
+        $showselect = count($options) > 1;
+
+        if ($showselect) {
+            $mform->addElement('select', 'optiontype', get_string('type', 'mod_booking'), $options);
+        } else {
+            $mform->addElement('hidden', 'optiontype', MOD_BOOKING_OPTIONTYPE_DEFAULT);
+        }
         $mform->setType('optiontype', PARAM_INT);
         $mform->setDefault('optiontype', MOD_BOOKING_OPTIONTYPE_DEFAULT);
 
@@ -176,16 +202,19 @@ class optiontype extends field_base {
         $mform->hideIf('slot_type_change_confirm', 'slot_type_change_has_answers', 'eq', 0);
         $mform->hideIf('slot_type_change_confirm', 'optiontype', 'eq', MOD_BOOKING_OPTIONTYPE_SLOTBOOKING);
 
-        $mform->registerNoSubmitButton('btn_optiontype');
-        $mform->addElement(
-            'submit',
-            'btn_optiontype',
-            'xxx',
-            [
-                'class' => 'd-none',
-                'data-action' => 'btn_optiontype',
-            ]
-        );
+        if ($showselect) {
+            // The hidden no-submit button is only triggered by a change of the select.
+            $mform->registerNoSubmitButton('btn_optiontype');
+            $mform->addElement(
+                'submit',
+                'btn_optiontype',
+                get_string('optiontype', 'mod_booking'),
+                [
+                    'class' => 'd-none',
+                    'data-action' => 'btn_optiontype',
+                ]
+            );
+        }
     }
 
     /**
@@ -217,11 +246,9 @@ class optiontype extends field_base {
             $data->selflearningcourse = 1;
         }
 
-        if (!slot_feature::is_enabled() && (int)$data->optiontype === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING) {
-            $data->optiontype = MOD_BOOKING_OPTIONTYPE_DEFAULT;
-        }
-
-        type_resolver::normalize_formdata($data, (int)$data->optiontype);
+        // The resolver drops a slot type that may not be chosen, but keeps it for options that
+        // already are stored as slot options.
+        type_resolver::normalize_formdata($data, (int)($settings->type ?? MOD_BOOKING_OPTIONTYPE_DEFAULT));
     }
 
     /**
@@ -236,7 +263,17 @@ class optiontype extends field_base {
         global $DB;
 
         $type = (int)($data['optiontype'] ?? MOD_BOOKING_OPTIONTYPE_DEFAULT);
-        if ($type === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING) {
+
+        $optionid = (int)($data['id'] ?? $data['optionid'] ?? 0);
+        $currenttype = MOD_BOOKING_OPTIONTYPE_DEFAULT;
+        if ($optionid > 0) {
+            $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+            $currenttype = (int)($settings->type ?? MOD_BOOKING_OPTIONTYPE_DEFAULT);
+        }
+
+        // Switching an option to slot booking needs the feature. Options that already are of this
+        // type may keep it, so they stay editable after the licence expired or the toggle went off.
+        if ($type === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING && $currenttype !== MOD_BOOKING_OPTIONTYPE_SLOTBOOKING) {
             if (!wb_payment::pro_version_is_activated()) {
                 $errors['optiontype'] = get_string('proversiononly', 'mod_booking');
                 return $errors;
@@ -248,23 +285,19 @@ class optiontype extends field_base {
             }
         }
 
-        if ($type === MOD_BOOKING_OPTIONTYPE_SELFLEARNINGCOURSE) {
-            $selflearningactive = wb_payment::pro_version_is_activated()
-                ? (int)get_config('booking', 'selflearningcourseactive')
-                : 0;
-
-            if ($selflearningactive !== 1) {
-                $errors['optiontype'] = get_string('turnthisoninsettings', 'mod_booking');
-            }
+        // Switching an option to self-learning needs the feature. Options that already are of this
+        // type may keep it, so they stay editable after the feature has been switched off.
+        if (
+            $type === MOD_BOOKING_OPTIONTYPE_SELFLEARNINGCOURSE
+            && $currenttype !== MOD_BOOKING_OPTIONTYPE_SELFLEARNINGCOURSE
+            && !selflearning_feature::is_enabled()
+        ) {
+            $errors['optiontype'] = get_string('turnthisoninsettings', 'mod_booking');
         }
 
-        $optionid = (int)($data['id'] ?? $data['optionid'] ?? 0);
         if ($optionid <= 0) {
             return $errors;
         }
-
-        $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
-        $currenttype = (int)($settings->type ?? MOD_BOOKING_OPTIONTYPE_DEFAULT);
 
         if ($currenttype !== MOD_BOOKING_OPTIONTYPE_SLOTBOOKING || $type === MOD_BOOKING_OPTIONTYPE_SLOTBOOKING) {
             return $errors;

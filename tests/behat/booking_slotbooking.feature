@@ -31,7 +31,7 @@ Feature: Slot booking option renders fixed calendar slots in student timezone
     And I change viewport size to "1366x6000"
 
   @javascript
-  Scenario: Slotbookig: student sees predefined Monday and Wednesday slot dates in slotbooking modal calendar and book one slot
+  Scenario: Slotbooking: Student sees predefined Monday and Wednesday slot dates in slotbooking modal calendar and books one slot
     Given I am on the "BookingSlots" Activity page logged in as student1
     And I should see "12" in the ".allbookingoptionstable_r1 .bookings " "css_element"
     When I click on "Book now" "text" in the ".allbookingoptionstable_r1" "css_element"
@@ -62,13 +62,30 @@ Feature: Slot booking option renders fixed calendar slots in student timezone
     And I should see "Thank you! You have successfully booked" in the ".modal-dialog.modal-xl .condition-confirmation" "css_element"
     And I should see "Slot booking option" in the ".modal-dialog.modal-xl .condition-confirmation" "css_element"
     And I follow "Close"
-    And I should see "Start" in the ".allbookingoptionstable_r1" "css_element"
     And I should see "11" in the ".allbookingoptionstable_r1 .bookings " "css_element"
+    ## With 1 of max 2 slots booked, the row must offer booking again instead of locking to the booked state.
+    And I should not see "Start" in the ".allbookingoptionstable_r1" "css_element"
+    And I should see "Book now" in the ".allbookingoptionstable_r1" "css_element"
     And I should see "Booked slots" in the ".allbookingoptionstable_r1 " "css_element"
+    And I should see "9 May 2046, 4:20 PM - 4:40 PM" in the ".allbookingoptionstable_r1 " "css_element"
+    ## Book a second slot (up to slot_max_slots_per_user); the already booked one is marked as booked.
+    When I click on "Book now" "text" in the ".allbookingoptionstable_r1" "css_element"
+    And I wait "1" seconds
+    And I click on "9" "button" in the ".booking-slot-calendar-grid" "css_element"
+    And I should see "Booked" in the ".booking-slot-fixed-editor .booking-slot--booked" "css_element"
+    And I click on "16:00 - 16:20" "text" in the ".booking-slot-fixed-editor" "css_element"
+    And I follow "Continue"
+    And I should see "Thank you! You have successfully booked" in the ".modal-dialog.modal-xl .condition-confirmation" "css_element"
+    And I follow "Close"
+    ## Capacity exhausted (2 of 2 slots): now the row locks to the booked state with the course "Start" link.
+    And I should see "10" in the ".allbookingoptionstable_r1 .bookings " "css_element"
+    And I should see "Start" in the ".allbookingoptionstable_r1" "css_element"
+    And I should see "Booked slots" in the ".allbookingoptionstable_r1 " "css_element"
+    And I should see "9 May 2046, 4:00 PM - 4:20 PM" in the ".allbookingoptionstable_r1 " "css_element"
     And I should see "9 May 2046, 4:20 PM - 4:40 PM" in the ".allbookingoptionstable_r1 " "css_element"
 
   @javascript
-  Scenario: Slotbookig: teacher update slot settings to roling and list view and student book one slot
+  Scenario: Slotbooking: Teacher update slot settings to rolling and list view and student book one slot
     Given I am on the "BookingSlots" Activity page logged in as teacher1
     And I should see "12" in the ".allbookingoptionstable_r1 .bookings " "css_element"
     And I click on "Edit booking option" "icon" in the ".allbookingoptionstable_r1" "css_element"
@@ -78,12 +95,20 @@ Feature: Slot booking option renders fixed calendar slots in student timezone
     ## replaces the form markup. Wait for it to finish, then make sure the section is
     ## expanded (idempotent - never collapses) so the conditionally shown
     ## "Slot booking interface" field is interactable.
+    ## Moodle 4.5 does not disable Bootstrap transitions in behat (5.0 does, MDL-75669),
+    ## so wait until the fieldset expand animation (.collapsing) has finished, otherwise
+    ## the conditionally shown fields below are not interactable yet.
     And I wait until the page is ready
     And I expand all fieldsets
+    And I wait until ".collapsing" "css_element" does not exist
     And I set the field "Slot booking interface" to "List view"
     And I set the field "Slot duration (minutes)" to "40"
     And I set the field "Slot interval (minutes)" to "20"
-    And I press "Save"
+    ## Save via JS click: on Moodle 4.5 the Bootstrap collapse transitions (not disabled
+    ## in behat there, see above) keep shifting the layout, so a real pointer click on
+    ## "Save" is intercepted by a section header's stretched-link. The JS click bypasses
+    ## hit-testing and cannot be intercepted.
+    And I click on "Save" "button" skipping visibility check
     And I log out
     And I am on the "BookingSlots" Activity page logged in as student1
     And I should see "10" in the ".allbookingoptionstable_r1 .bookings " "css_element"
@@ -104,10 +129,26 @@ Feature: Slot booking option renders fixed calendar slots in student timezone
     And I should see "Thank you! You have successfully booked" in the ".modal-dialog.modal-xl .condition-confirmation" "css_element"
     And I should see "Slot booking option" in the ".modal-dialog.modal-xl .condition-confirmation" "css_element"
     And I follow "Close"
-    And I should see "Start" in the ".allbookingoptionstable_r1" "css_element"
     And I should see "9" in the ".allbookingoptionstable_r1 .bookings " "css_element"
+    ## With 1 of max 2 slots booked, the row must offer booking again instead of locking to the booked state.
+    And I should not see "Start" in the ".allbookingoptionstable_r1" "css_element"
+    And I should see "Book now" in the ".allbookingoptionstable_r1" "css_element"
     And I should see "Booked slots" in the ".allbookingoptionstable_r1 " "css_element"
     And I should see "7 May 2046, 5:20 PM - 6:00 PM" in the ".allbookingoptionstable_r1 " "css_element"
+    ## Book a second slot (up to slot_max_slots_per_user); the already booked one is greyed out in the list.
+    When I click on "Book now" "text" in the ".allbookingoptionstable_r1" "css_element"
+    And I wait until the page is ready
+    And I should see "5:20 PM - 6:00 PM" in the ".booking-slot-list-item--booked" "css_element"
+    And I click on "Wednesday, 9 May 2046 - 4:00 PM - 4:40 PM" "text" in the ".booking-slotbooking-prepage" "css_element"
+    And I follow "Continue"
+    And I should see "Thank you! You have successfully booked" in the ".modal-dialog.modal-xl .condition-confirmation" "css_element"
+    And I follow "Close"
+    ## Capacity exhausted (2 of 2 slots): now the row locks to the booked state with the course "Start" link.
+    And I should see "8" in the ".allbookingoptionstable_r1 .bookings " "css_element"
+    And I should see "Start" in the ".allbookingoptionstable_r1" "css_element"
+    And I should see "Booked slots" in the ".allbookingoptionstable_r1 " "css_element"
+    And I should see "7 May 2046, 5:20 PM - 6:00 PM" in the ".allbookingoptionstable_r1 " "css_element"
+    And I should see "9 May 2046, 4:00 PM - 4:40 PM" in the ".allbookingoptionstable_r1 " "css_element"
 
   @javascript
   Scenario: Slotbooking: teacher enables self-service rebooking and the opt-in persists

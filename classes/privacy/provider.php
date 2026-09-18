@@ -50,11 +50,8 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class provider implements
-    // This plugin stores personal data.
     \core_privacy\local\metadata\provider,
-    // This plugin is capable of determining which users have data within it.
     \core_privacy\local\request\core_userlist_provider,
-    // This plugin is a core_user_data_provider.
     \core_privacy\local\request\plugin\provider {
     /**
      * Return the fields which contain personal data.
@@ -217,6 +214,83 @@ class provider implements
                 'timemodified' => 'privacy:metadata:bookingoptiondatesanswers:timemodified',
             ],
             'privacy:metadata:bookingoptiondatesanswers'
+        );
+
+        $collection->add_database_table(
+            'booking_slot_moves',
+            [
+                'optionid' => 'privacy:metadata:bookingslotmoves:optionid',
+                'baid' => 'privacy:metadata:bookingslotmoves:baid',
+                'userid' => 'privacy:metadata:bookingslotmoves:userid',
+                'newslots' => 'privacy:metadata:bookingslotmoves:newslots',
+                'oldslots' => 'privacy:metadata:bookingslotmoves:oldslots',
+                'pricedelta' => 'privacy:metadata:bookingslotmoves:pricedelta',
+                'status' => 'privacy:metadata:bookingslotmoves:status',
+                'expiry' => 'privacy:metadata:bookingslotmoves:expiry',
+                'identifier' => 'privacy:metadata:bookingslotmoves:identifier',
+                'timecreated' => 'privacy:metadata:bookingslotmoves:timecreated',
+                'timemodified' => 'privacy:metadata:bookingslotmoves:timemodified',
+            ],
+            'privacy:metadata:bookingslotmoves'
+        );
+
+        $collection->add_database_table(
+            'booking_slot_student_teacher',
+            [
+                'optionid' => 'privacy:metadata:bookingslotstudentteacher:optionid',
+                'userid' => 'privacy:metadata:bookingslotstudentteacher:userid',
+                'teacherid' => 'privacy:metadata:bookingslotstudentteacher:teacherid',
+                'timecreated' => 'privacy:metadata:bookingslotstudentteacher:timecreated',
+                'timemodified' => 'privacy:metadata:bookingslotstudentteacher:timemodified',
+            ],
+            'privacy:metadata:bookingslotstudentteacher'
+        );
+
+        $collection->add_database_table(
+            'booking_sync_attempts',
+            [
+                'syncruleid' => 'privacy:metadata:bookingsyncattempts:syncruleid',
+                'bookingoptionid' => 'privacy:metadata:bookingsyncattempts:bookingoptionid',
+                'userid' => 'privacy:metadata:bookingsyncattempts:userid',
+                'action' => 'privacy:metadata:bookingsyncattempts:action',
+                'reasoncode' => 'privacy:metadata:bookingsyncattempts:reasoncode',
+                'reasonmessage' => 'privacy:metadata:bookingsyncattempts:reasonmessage',
+                'timecreated' => 'privacy:metadata:bookingsyncattempts:timecreated',
+            ],
+            'privacy:metadata:bookingsyncattempts'
+        );
+
+        $collection->add_database_table(
+            'booking_teacher_unavailability',
+            [
+                'optionid' => 'privacy:metadata:bookingteacherunavailability:optionid',
+                'teacherid' => 'privacy:metadata:bookingteacherunavailability:teacherid',
+                'unavailable_from' => 'privacy:metadata:bookingteacherunavailability:unavailablefrom',
+                'unavailable_until' => 'privacy:metadata:bookingteacherunavailability:unavailableuntil',
+                'reason' => 'privacy:metadata:bookingteacherunavailability:reason',
+                'timecreated' => 'privacy:metadata:bookingteacherunavailability:timecreated',
+            ],
+            'privacy:metadata:bookingteacherunavailability'
+        );
+
+        // The booking action "Execute REST script" (bo_actions\action_types\executerestscript)
+        // is the only place where this plugin transmits data to an external system. Nothing is
+        // sent unless a trainer/admin explicitly configures such an action on a booking option;
+        // the target endpoint is defined in that configuration, so no fixed third party can be
+        // named here. Depending on the configuration, the request contains the booking user's
+        // profile data, their custom booking form answers and any placeholder values used in
+        // the configured JSON body.
+        $collection->add_external_location_link(
+            'restscript',
+            [
+                'firstname' => 'privacy:metadata:restscript:firstname',
+                'lastname' => 'privacy:metadata:restscript:lastname',
+                'email' => 'privacy:metadata:restscript:email',
+                'username' => 'privacy:metadata:restscript:username',
+                'customform' => 'privacy:metadata:restscript:customform',
+                'placeholders' => 'privacy:metadata:restscript:placeholders',
+            ],
+            'privacy:metadata:restscript'
         );
 
         return $collection;
@@ -413,6 +487,17 @@ class provider implements
             // Now we can delete all entries in booking_userevents within the instance.
             $DB->delete_records_select('booking_userevents', $usereventswhere, ['bookingid' => $cm->instance]);
             $DB->delete_records('booking_history', ['bookingid' => $cm->instance]);
+
+            // Slot booking and sync data is keyed by option, so delete via the options of the instance.
+            $optionswhere = 'optionid IN (SELECT id FROM {booking_options} WHERE bookingid = :bookingid)';
+            $DB->delete_records_select('booking_slot_moves', $optionswhere, ['bookingid' => $cm->instance]);
+            $DB->delete_records_select('booking_slot_student_teacher', $optionswhere, ['bookingid' => $cm->instance]);
+            $DB->delete_records_select('booking_teacher_unavailability', $optionswhere, ['bookingid' => $cm->instance]);
+            $DB->delete_records_select(
+                'booking_sync_attempts',
+                'bookingoptionid IN (SELECT id FROM {booking_options} WHERE bookingid = :bookingid)',
+                ['bookingid' => $cm->instance]
+            );
         }
     }
 
@@ -454,6 +539,15 @@ class provider implements
 
         // Now, we can delete the records in booking_userevents.
         $DB->delete_records('booking_userevents', ['userid' => $userid]);
+
+        // Slot booking and sync data (keyed by option, not by booking id) is deleted independent of contexts too.
+        $DB->delete_records('booking_slot_moves', ['userid' => $userid]);
+        $DB->delete_records('booking_sync_attempts', ['userid' => $userid]);
+        $DB->delete_records('booking_slot_student_teacher', ['userid' => $userid]);
+        // Where the user is the assigned teacher, the row is primarily the student's booking
+        // data, so only remove the reference to the teacher instead of deleting the row.
+        $DB->set_field('booking_slot_student_teacher', 'teacherid', 0, ['teacherid' => $userid]);
+        $DB->delete_records('booking_teacher_unavailability', ['teacherid' => $userid]);
     }
 
     /**
@@ -517,6 +611,19 @@ class provider implements
 
         // Add users with booking_history.
         $userlist->add_from_sql('userid', "SELECT userid FROM {booking_history}", []);
+
+        // Add users with slot moves.
+        $userlist->add_from_sql('userid', "SELECT userid FROM {booking_slot_moves}", []);
+
+        // Add users with enrolment sync attempts.
+        $userlist->add_from_sql('userid', "SELECT userid FROM {booking_sync_attempts}", []);
+
+        // Add students and teachers of slot teacher assignments.
+        $userlist->add_from_sql('userid', "SELECT userid FROM {booking_slot_student_teacher}", []);
+        $userlist->add_from_sql('userid', "SELECT teacherid FROM {booking_slot_student_teacher}", []);
+
+        // Add teachers with unavailability periods.
+        $userlist->add_from_sql('userid', "SELECT teacherid FROM {booking_teacher_unavailability}", []);
     }
 
     /**
@@ -559,5 +666,11 @@ class provider implements
         $DB->delete_records_select('booking_odt_deductions', $select, $params);
         $DB->delete_records_select('booking_icalsequence', $select, $params);
         $DB->delete_records_select('booking_optiondates_answers', $select, $params);
+        $DB->delete_records_select('booking_slot_moves', $select, $params);
+        $DB->delete_records_select('booking_sync_attempts', $select, $params);
+        $DB->delete_records_select('booking_slot_student_teacher', $select, $params);
+        // Where a deleted user is the assigned teacher, keep the student's row but drop the reference.
+        $DB->set_field_select('booking_slot_student_teacher', 'teacherid', 0, "teacherid $usersql", $params);
+        $DB->delete_records_select('booking_teacher_unavailability', "teacherid $usersql", $params);
     }
 }

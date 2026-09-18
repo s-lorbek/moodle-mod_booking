@@ -2513,17 +2513,9 @@ function xmldb_booking_upgrade($oldversion) {
     }
 
     if ($oldversion < 2017112101) {
-        $sql = 'SELECT MAX(id), cfgname, optionid, COUNT(*)
-                  FROM {booking_customfields}
-              GROUP BY optionid, cfgname
-                HAVING COUNT(*) > 1';
-        while ($records = $DB->get_records_sql($sql)) {
-            if (!empty($records)) {
-                foreach ($records as $id => $record) {
-                    $DB->delete_records('booking_customfields', ['id' => $id]);
-                }
-            }
-        }
+        // The deduplication can take a while on big tables, make sure the upgrade does not time out.
+        upgrade_set_timeout();
+        booking_delete_duplicate_customfields_2017112101();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2017112101, 'booking');
@@ -3572,7 +3564,7 @@ function xmldb_booking_upgrade($oldversion) {
     if ($oldversion < 2022090802) {
         // Get rid of the old "unique option names" workaround.
         // We use a separate "identifier" field now.
-        migrate_booking_option_identifiers_2022090802();
+        booking_migrate_option_identifiers_2022090802();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2022090802, 'booking');
@@ -3918,7 +3910,7 @@ function xmldb_booking_upgrade($oldversion) {
 
     if ($oldversion < 2022112901) {
         // We need to migrate optionids to itemids and set the area to 'option'.
-        migrate_optionids_for_prices_2022112901();
+        booking_migrate_optionids_for_prices_2022112901();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2022112901, 'booking');
@@ -3996,7 +3988,7 @@ function xmldb_booking_upgrade($oldversion) {
             $dbman->drop_index($table, $index);
         }
 
-        fix_booking_templateid();
+        booking_fix_templateid();
 
         $table = new xmldb_table('booking');
         $field = new xmldb_field('templateid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'allowupdatedays');
@@ -4295,7 +4287,7 @@ function xmldb_booking_upgrade($oldversion) {
 
     if ($oldversion < 2023022800) {
         // We need to migrate optionsfields for the new view.php.
-        migrate_optionsfields_2023022800();
+        booking_migrate_optionsfields_2023022800();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2023022800, 'booking');
@@ -4535,7 +4527,7 @@ function xmldb_booking_upgrade($oldversion) {
 
     if ($oldversion < 2024022700) {
         // Fix bugs with description format.
-        fix_bookingoption_descriptionformat_2024022700();
+        booking_fix_bookingoption_descriptionformat_2024022700();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2024022700, 'booking');
@@ -4568,7 +4560,7 @@ function xmldb_booking_upgrade($oldversion) {
 
     if ($oldversion < 2024030801) {
         // Fix bugs with showlistoncoursepage field.
-        fix_showlistoncoursepage_2024030801();
+        booking_fix_showlistoncoursepage_2024030801();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2024030801, 'booking');
@@ -4601,7 +4593,7 @@ function xmldb_booking_upgrade($oldversion) {
         $dbman->rename_field($table, $field, 'contextid');
 
         // We need to migrate optionsfields for the new view.php.
-        migrate_contextids_2024040901();
+        booking_migrate_contextids_2024040901();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2024040901, 'booking');
@@ -4667,7 +4659,7 @@ function xmldb_booking_upgrade($oldversion) {
             $dbman->add_field($table, $field);
         }
 
-        fix_places_for_booking_answers();
+        booking_fix_places_for_booking_answers();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2024082903, 'booking');
@@ -4780,13 +4772,9 @@ function xmldb_booking_upgrade($oldversion) {
     }
 
     if ($oldversion < 2024121600) {
-        // Fetch all booking options where availability is empty or null.
-        $records = $DB->get_records_select('booking_options', "availability = '' OR availability IS NULL");
-
-        foreach ($records as $record) {
-            $record->availability = '[]'; // Update the availability field.
-            $DB->update_record('booking_options', $record);
-        }
+        // Set empty or null availability to '[]' in one single statement instead of
+        // loading and rewriting every affected booking option row one by one.
+        $DB->set_field_select('booking_options', 'availability', '[]', "availability = '' OR availability IS NULL");
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2024121600, 'booking');
@@ -4808,7 +4796,7 @@ function xmldb_booking_upgrade($oldversion) {
 
     if ($oldversion < 2025010803) {
         // Remove values form completiongradeitemnumber and completionpassgrade to avoid #779 error after #629.
-        remove_completiongradeitemnumber_2025010803();
+        booking_remove_completiongradeitemnumber_2025010803();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2025010803, 'booking');
@@ -4880,7 +4868,7 @@ function xmldb_booking_upgrade($oldversion) {
             $dbman->add_field($table, $field);
         }
 
-        fix_places_for_booking_answers();
+        booking_fix_places_for_booking_answers();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2025022601, 'booking');
@@ -5139,7 +5127,7 @@ function xmldb_booking_upgrade($oldversion) {
 
     if ($oldversion < 2025122201) {
         // Migrate old selflearningcourse json flag to new type field.
-        migrate_selflearningcourse_json_to_type_2025122201();
+        booking_migrate_selflearningcourse_json_to_type_2025122201();
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2025122201, 'booking');
@@ -5190,7 +5178,7 @@ function xmldb_booking_upgrade($oldversion) {
 
     if ($oldversion < 2026030500) {
         // Run a script that deletes all custom fields within the tool_certificate component.
-        delete_customfields_in_tool_certificate_2026030500();
+        booking_delete_customfields_in_tool_certificate_2026030500();
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2026030500, 'booking');
     }
@@ -5560,6 +5548,117 @@ function xmldb_booking_upgrade($oldversion) {
         }
 
         upgrade_mod_savepoint(true, 2026062302, 'booking');
+    }
+
+    if ($oldversion < 2026071501) {
+        // Warmup/cooldown buffer settings for slot booking (fixed slots).
+        $table = new xmldb_table('booking_slot_config');
+
+        $warmupfield = new xmldb_field(
+            'buffer_warmup_minutes',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '0',
+            'change_deadline_minutes'
+        );
+        if (!$dbman->field_exists($table, $warmupfield)) {
+            $dbman->add_field($table, $warmupfield);
+        }
+
+        $cooldownfield = new xmldb_field(
+            'buffer_cooldown_minutes',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '0',
+            'buffer_warmup_minutes'
+        );
+        if (!$dbman->field_exists($table, $cooldownfield)) {
+            $dbman->add_field($table, $cooldownfield);
+        }
+
+        $combinationmodefield = new xmldb_field(
+            'buffer_combination_mode',
+            XMLDB_TYPE_CHAR,
+            '20',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            'summed',
+            'buffer_cooldown_minutes'
+        );
+        if (!$dbman->field_exists($table, $combinationmodefield)) {
+            $dbman->add_field($table, $combinationmodefield);
+        }
+
+        upgrade_mod_savepoint(true, 2026071501, 'booking');
+    }
+
+    if ($oldversion < 2026071502) {
+        // Configurable duration step (granularity) for userdefined slot type.
+        $table = new xmldb_table('booking_slot_config');
+
+        $stepfield = new xmldb_field(
+            'slot_duration_step_minutes',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            '15',
+            'buffer_combination_mode'
+        );
+        if (!$dbman->field_exists($table, $stepfield)) {
+            $dbman->add_field($table, $stepfield);
+        }
+
+        upgrade_mod_savepoint(true, 2026071502, 'booking');
+    }
+
+    if ($oldversion < 2026072200) {
+        // The bookings tracker (report2.php) is always active now - its on/off
+        // setting was removed, so drop the stale config value.
+        unset_config('bookingstracker', 'booking');
+
+        upgrade_mod_savepoint(true, 2026072200, 'booking');
+    }
+
+    if ($oldversion < 2026073100) {
+        // The location hover card image setting was renamed to entitytreefiltershowlocationimages
+        // to group it under the multilevel location filter setting. Migrate a stored value.
+        $oldvalue = get_config('booking', 'showlocationimages');
+        if ($oldvalue !== false) {
+            set_config('entitytreefiltershowlocationimages', $oldvalue, 'booking');
+            unset_config('showlocationimages', 'booking');
+        }
+
+        upgrade_mod_savepoint(true, 2026073100, 'booking');
+    }
+
+    if ($oldversion < 2026080701) {
+        // Aggregated daily snapshots of the booking cache report metrics.
+        $table = new xmldb_table('booking_cachereport_snapshots');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('samplesize', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('distinctstems', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('sqlfilteroptions', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('querytimefiltered', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('querytimeplain', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('extrasjson', XMLDB_TYPE_TEXT, null, null, null, null, null);
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('timecreatedx', XMLDB_INDEX_NOTUNIQUE, ['timecreated']);
+
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2026080701, 'booking');
     }
 
     return true;

@@ -73,8 +73,9 @@ class customform_form extends dynamic_form {
      *
      * The userid is supplied by the client and used to read/write the per-user customform cache
      * (an application cache keyed only by userid + optionid). Acting on your own data is always
-     * allowed; acting on behalf of another user requires the mod/booking:bookforothers capability
-     * on the booking option's module context.
+     * allowed; acting on behalf of another user requires either the local/shopping_cart:cashier
+     * capability on system context (cashiers book for other users, e.g. on the cashier page) or
+     * the mod/booking:bookforothers capability on the booking option's module context.
      *
      * @param int $userid the user whose custom form data is being accessed
      * @param int $optionid the booking option id, used to resolve the module context
@@ -84,6 +85,15 @@ class customform_form extends dynamic_form {
         global $USER;
 
         if (empty($userid) || $userid === (int) $USER->id) {
+            return;
+        }
+
+        // Cashiers act on behalf of other users without needing mod/booking:bookforothers.
+        // This mirrors the check in shortcodes::init_table_for_courses().
+        if (
+            class_exists('local_shopping_cart\shopping_cart')
+            && has_capability('local/shopping_cart:cashier', context_system::instance())
+        ) {
             return;
         }
 
@@ -165,7 +175,9 @@ class customform_form extends dynamic_form {
         $settings = singleton_service::get_instance_of_booking_option_settings((int)$id);
 
         $mform->addElement('hidden', 'id', $id);
+        $mform->setType('id', PARAM_INT);
         $mform->addElement('hidden', 'userid', $userid);
+        $mform->setType('userid', PARAM_INT);
 
         $availability = json_decode($settings->availability ?? '[]');
 
@@ -187,8 +199,10 @@ class customform_form extends dynamic_form {
 
             $mform = $this->_form;
 
-            $counter = 1;
             foreach ($formvalue as $formelementkey => $formelementvalue) {
+                // The runtime identifier is built from the stable elementid; for json
+                // that predates elementids this is the position, i.e. the array key.
+                $counter = (int)($formelementvalue->elementid ?? $formelementkey);
                 // We might need custom solutions, therefore we have the switch here.
                 switch ($formelementvalue->formtype) {
                     case 'static':
@@ -196,7 +210,7 @@ class customform_form extends dynamic_form {
                         $mform->addElement(
                             'static',
                             $identifier,
-                            format_string($formelementvalue->label),
+                            format_string($formelementvalue->label, false),
                             format_text($formelementvalue->value)
                         );
                         break;
@@ -206,7 +220,7 @@ class customform_form extends dynamic_form {
                             'advcheckbox',
                             $identifier,
                             '',
-                            format_string($formelementvalue->label) ?? "Label " . $counter
+                            format_text($formelementvalue->label, FORMAT_HTML) ?? "Label " . $counter
                         );
                         break;
                     case 'shorttext':
@@ -294,6 +308,7 @@ class customform_form extends dynamic_form {
                             format_string($formelementvalue->label) ?? "Label " . $counter
                         );
                         $mform->setDefault('customform_url_' . $counter, $formelementvalue->value);
+                        $mform->setType($identifier, PARAM_TEXT);
                         break;
                     case 'mail':
                         $identifier = 'customform_' . $formelementvalue->formtype . '_' . $counter;
@@ -303,6 +318,7 @@ class customform_form extends dynamic_form {
                             format_string($formelementvalue->label) ?? "Label " . $counter
                         );
                         $mform->setDefault('customform_mail_' . $counter, $formelementvalue->value);
+                        $mform->setType($identifier, PARAM_TEXT);
                         break;
                     case 'deleteinfoscheckboxuser':
                         if ($deleteform) {
@@ -386,7 +402,24 @@ class customform_form extends dynamic_form {
                         }
                 }
 
-                $counter++;
+                // Mandatory elements get the core required marker (red exclamation mark),
+                // so participants see which fields they have to fill in before they submit.
+                // Mirrors the handling of the modal to change form values (modal_change_customform).
+                if (
+                    !empty($formelementvalue->notempty)
+                    && !in_array($formelementvalue->formtype, ['static', 'deleteinfoscheckboxuser'])
+                ) {
+                    $identifier = 'customform_' . $formelementvalue->formtype . '_' . $counter;
+                    if ($mform->elementExists($identifier)) {
+                        $mform->addRule(
+                            $identifier,
+                            get_string('error:mustnotbeempty', 'mod_booking'),
+                            'required',
+                            null,
+                            'client'
+                        );
+                    }
+                }
             }
 
             $dataarray['data']['formsarray'][] = $formelements;

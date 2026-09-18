@@ -29,6 +29,8 @@ use context_system;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\freezable_condition;
 use mod_booking\bo_availability\bo_info;
+use mod_booking\bo_availability\sqlfilter_form_support;
+use mod_booking\bo_availability\sqlfilter_relevance;
 use mod_booking\booking_option_settings;
 use mod_booking\singleton_service;
 use mod_booking\utils\wb_payment;
@@ -201,6 +203,12 @@ class enrolledincohorts implements bo_condition, freezable_condition {
         }
 
         $usercohorts = singleton_service::get_cohorts_of_user($userid);
+        // Trim to the cohort ids any sqlfilter condition references site-wide:
+        // other ids can never match a configured condition, but they would make
+        // the SQL string (and with it the table cache key) unique per user.
+        $relevantids = sqlfilter_relevance::trim_to_referenced($this->id, array_keys($usercohorts));
+        $usercohorts = array_intersect_key($usercohorts, array_flip($relevantids));
+        ksort($usercohorts);
         $databasetype = $DB->get_dbfamily();
         $conditionid = $this->id;
 
@@ -208,7 +216,7 @@ class enrolledincohorts implements bo_condition, freezable_condition {
             if ($databasetype == 'postgres') {
                 $where = "
                     (
-                        availability IS NOT NULL
+                        COALESCE(availability, '[]') IS NOT NULL
                         AND NOT EXISTS (
                             SELECT 1 FROM jsonb_array_elements(availability::jsonb) AS obj
                             WHERE (obj->>'id')::int = $conditionid
@@ -217,18 +225,22 @@ class enrolledincohorts implements bo_condition, freezable_condition {
                     )";
             } else if (
                 $databasetype == 'mysql'
-                && db_is_at_least_mariadb_106_or_mysql_8()
+                && booking_db_is_at_least_mariadb_106_or_mysql_8()
             ) {
+                // MySQL: JSON_TABLE must not read the availability column of the outer derived table (s1) - as soon as
+                // MySQL merges that derived table into the outer query, such a reference fails with
+                // "Incorrect arguments to JSON_TABLE". So we read the base table {booking_options} instead.
                 $where = "
                     (
-                        availability IS NOT NULL
-                        AND NOT EXISTS (
-                            SELECT 1 FROM JSON_TABLE(availability, '$[*]' COLUMNS (
+                        COALESCE(availability, '[]') IS NOT NULL
+                        AND id NOT IN (
+                            SELECT bo_sf.id
+                            FROM {booking_options} bo_sf
+                            JOIN JSON_TABLE(bo_sf.availability, '$[*]' COLUMNS (
                                 id INT PATH '$.id',
                                 sqlfilter VARCHAR(10) PATH '$.sqlfilter'
-                            )) AS jt
-                            WHERE jt.id = $conditionid
-                            AND jt.sqlfilter = '1'
+                            )) AS jt ON jt.id = $conditionid
+                            WHERE jt.sqlfilter = '1'
                         )
                     )";
             } else {
@@ -242,7 +254,7 @@ class enrolledincohorts implements bo_condition, freezable_condition {
             $appendwhere2 = implode(', ', $cohortidstext);
 
             $where = "
-            availability IS NOT NULL
+            COALESCE(availability, '[]') IS NOT NULL
             AND
             (
                 (
@@ -282,22 +294,26 @@ class enrolledincohorts implements bo_condition, freezable_condition {
             return ['', '', '', $params, $where];
         } else if (
             $databasetype == 'mysql'
-            && db_is_at_least_mariadb_106_or_mysql_8()
+            && booking_db_is_at_least_mariadb_106_or_mysql_8()
         ) {
             $cohortidstext = array_map(fn($id) => "'" . $id . "'", array_keys($usercohorts));
             $appendwhere = implode(', ', $cohortidstext);
 
+            // MySQL: JSON_TABLE must not read the availability column of the outer derived table (s1) - as soon as
+            // MySQL merges that derived table into the outer query, such a reference fails with
+            // "Incorrect arguments to JSON_TABLE". So we read the base table {booking_options} instead.
             $where = "
-                availability IS NOT NULL
+                COALESCE(availability, '[]') IS NOT NULL
                 AND (
                         (
-                            NOT EXISTS (
-                                SELECT 1 FROM JSON_TABLE(availability, '$[*]' COLUMNS (
+                            id NOT IN (
+                                SELECT bo_sf.id
+                                FROM {booking_options} bo_sf
+                                JOIN JSON_TABLE(bo_sf.availability, '$[*]' COLUMNS (
                                     id INT PATH '$.id',
                                     sqlfilter VARCHAR(10) PATH '$.sqlfilter'
-                                )) AS jt
-                                WHERE jt.id = $conditionid
-                                AND jt.sqlfilter = '1'
+                                )) AS jt ON jt.id = $conditionid
+                                WHERE jt.sqlfilter = '1'
                             )
                         )
                     OR (
@@ -331,6 +347,18 @@ class enrolledincohorts implements bo_condition, freezable_condition {
         } else {
             return ['', '', '', $params, ''];
         }
+    }
+
+    /**
+     * Return the user values this condition references in the given availability
+     * entry. Used by the sqlfilter relevance service to trim the user data
+     * embedded into the filter SQL down to the site-wide relevant set.
+     *
+     * @param stdClass $entry availability json entry of this condition
+     * @return array referenced cohort ids
+     */
+    public static function sqlfilter_referenced_values(stdClass $entry): array {
+        return array_map('intval', (array) ($entry->cohortids ?? []));
     }
 
     /**
@@ -403,6 +431,7 @@ class enrolledincohorts implements bo_condition, freezable_condition {
             'bo_cond_enrolledincohorts_cohortids',
             'bo_cond_enrolledincohorts_cohortids_operator',
             'bo_cond_enrolledincohorts_sqlfiltercheck',
+            'bo_cond_enrolledincohorts_sqlfiltercheck_disablednote',
             'bo_cond_enrolledincohorts_overrideconditioncheckbox',
             'bo_cond_enrolledincohorts_overrideoperator',
             'bo_cond_enrolledincohorts_overridecondition',
@@ -485,6 +514,10 @@ class enrolledincohorts implements bo_condition, freezable_condition {
                 get_string('sqlfiltercheckstring', 'mod_booking')
             );
             $mform->hideIf('bo_cond_enrolledincohorts_sqlfiltercheck', 'bo_cond_enrolledincohorts_restrict', 'notchecked');
+            $notename = sqlfilter_form_support::freeze_when_disabled($mform, 'bo_cond_enrolledincohorts_sqlfiltercheck');
+            if ($notename !== null) {
+                $mform->hideIf($notename, 'bo_cond_enrolledincohorts_restrict', 'notchecked');
+            }
 
             $mform->addElement(
                 'advcheckbox',

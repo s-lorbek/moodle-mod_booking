@@ -32,6 +32,7 @@ use local_entities\local\entities\entitydate;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\customfield\booking_handler;
 use mod_booking\local\modechecker;
+use mod_booking\local\slotbooking\slot_availability;
 use mod_booking\teachers_handler;
 use mod_booking\utils\wb_payment;
 use local_wunderbyte_table\wunderbyte_table;
@@ -633,7 +634,11 @@ class booking {
         return $DB->get_fieldset_select(
             'booking_teachers',
             'optionid',
-            "userid = {$USER->id} AND bookingid = $bookingid"
+            "userid = :userid AND bookingid = :bookingid",
+            [
+                'userid' => $USER->id,
+                'bookingid' => $bookingid,
+            ]
         );
     }
 
@@ -1014,6 +1019,10 @@ class booking {
                     $columns[] = 'timecreated';
                     $headers[] = get_string('timecreated', 'mod_booking');
                     break;
+                case 'timebooked':
+                    $columns[] = 'timebooked';
+                    $headers[] = get_string('timebooked', 'mod_booking');
+                    break;
                 case 'certificate':
                         $headers[] = get_string('certificate', 'mod_booking');
                         $columns[] = 'certificate';
@@ -1198,12 +1207,14 @@ class booking {
 
         $params = [];
 
-        $groupby = " " . implode(", ", $offieldsarray) . " ";
+        $offields = " " . implode(", ", $offieldsarray) . " ";
 
         $outerfrom = "(
-                        SELECT $groupby ";
+                        SELECT $offields ";
 
-        $innerfrom = empty($innerfrom) ? "FROM {booking_options} bo" : $innerfrom;
+        // A custom innerfrom (e.g. fieldofstudy) may deliver a derived table instead of {booking_options}.
+        $hascustominnerfrom = !empty($innerfrom);
+        $innerfrom = $hascustominnerfrom ? $innerfrom : "FROM {booking_options} bo";
 
         // If the user does not have the capability to see invisible options...
         if (!$context || !has_capability('mod/booking:canseeinvisibleoptions', $context)) {
@@ -1258,7 +1269,6 @@ class booking {
             $outerfrom .= ", ba.waitinglist, ba.userid as bookeduserid, ba.completed ";
             $where .= " AND waitinglist $inorequal
                         AND bookeduserid=:bookeduserid ";
-            $groupby .= " , ba.waitinglist, ba.userid, ba.completed ";
 
             $params['bookeduserid'] = $userid;
 
@@ -1305,26 +1315,31 @@ class booking {
         $innerfrom .= " $from2 ";
         $innerfrom .= " $from3 ";
 
-        $pattern = '/as.*?,/';
-        $addgroupby = preg_replace($pattern, ',', $select1 . ",");
-        $groupby .= !empty($addgroupby) ? ' , ' . $addgroupby : '';
-
-        // Here, $select2 (teachers) is an aggregate (sql_group_concat renders as
-        // GROUP_CONCAT on MySQL/MariaDB and STRING_AGG on PostgreSQL/MSSQL) and
-        // must never be echoed into GROUP BY, so it is intentionally not added here.
-
-        $addgroupby = preg_replace($pattern, ',', $select3 . ",");
-        $groupby .= !empty($addgroupby) ? ' , ' . $addgroupby : '';
-
-        $groupbyarray = (array)explode(',', $groupby);
-
-        foreach ($groupbyarray as $key => $value) {
-            if (empty(trim($value))) {
-                unset($groupbyarray[$key]);
+        // The outer select is normally NOT grouped: the teachers are already aggregated to one row per option
+        // inside their subquery (see return_sql_for_teachers) and all other joins (customfields, image file)
+        // return at most one row per booking option. Grouping by all columns of {booking_options} (including
+        // several TEXT columns) made MySQL 8 fail with "Out of sort memory" (error 1038).
+        // We only need a GROUP BY when the option rows can actually be multiplied:
+        // - by the join on the booking answers of a user (a user can have several answers for one option),
+        // - by a custom innerfrom (derived table), which may return the same option more than once.
+        $groupby = '';
+        if ($userid !== null || $hascustominnerfrom) {
+            // With the real {booking_options} table, bo.id is enough (functional dependency on the primary key).
+            // A derived table has no primary key, so there we have to list all columns.
+            $groupbyarray = $hascustominnerfrom ? $offieldsarray : ['bo.id'];
+            if ($userid !== null) {
+                $groupbyarray = array_merge($groupbyarray, ['ba.waitinglist', 'ba.userid', 'ba.completed']);
             }
+            // All non-aggregated columns of the supplementary selects have to be part of the GROUP BY.
+            $pattern = '/as.*?,/';
+            $addgroupby = preg_replace($pattern, ',', $select1 . "," . $select2 . "," . $select3 . ",");
+            foreach (explode(',', $addgroupby) as $value) {
+                if (!empty(trim($value))) {
+                    $groupbyarray[] = trim($value);
+                }
+            }
+            $groupby = "GROUP BY " . implode(" , ", $groupbyarray);
         }
-
-        $groupby = implode(" , ", $groupbyarray);
 
         // Now we merge all the params arrays.
         $params = array_merge($params, $params1, $params2, $params3, $params4 ?? []);
@@ -1333,11 +1348,9 @@ class booking {
         $from = $outerfrom;
         $from .= $innerfrom;
 
-        // Finally, we add the outer group by.
-        $groupby = "GROUP BY " . $groupby . "
+        // Finally, we close the subselect (with the outer group by, if needed).
+        $from .= " $groupby
                     ) s1";
-
-        $from .= $groupby;
 
         // Add the where at the right place.
         $filter .= " $filter1 ";
@@ -1441,11 +1454,16 @@ class booking {
             'teacherobjects' => '%"id":' . $teacherid . ',%',
         ];
 
+        $context = null;
         if (!empty($bookingid)) {
             $options['bookingid'] = $bookingid;
+            // Pass the instance context so that mod/booking:canseeinvisibleoptions is respected.
+            // Without a context, get_options_filter_sql() always hides invisible options.
+            $booking = singleton_service::get_instance_of_booking_by_bookingid($bookingid);
+            $context = $booking->context ?? null;
         }
 
-        return self::get_options_filter_sql(0, 0, '', '*', null, [], $options);
+        return self::get_options_filter_sql(0, 0, '', '*', $context, [], $options);
     }
 
     /**
@@ -1517,13 +1535,41 @@ class booking {
             return [];
         }
 
+        // We ignore the records for slotbooking options, because their occupancy is defined by the
+        // individually booked slots (stored in booking_answers), not by the option's own start/end.
+        if (empty($inoptionsql) && empty($inoptiondatesql)) {
+            $sql .= " WHERE s1.type <> :slotbookingtype";
+        } else {
+            $sql .= " AND s1.type <> :slotbookingtype";
+        }
+        $params['slotbookingtype'] = MOD_BOOKING_OPTIONTYPE_SLOTBOOKING;
+
         // Now we make an SQL call to return all the relevant dates.
         $records = $DB->get_records_sql($sql, $params);
 
         $returnarray = [];
 
+        // Determine which of the requested option-level items are slotbooking options. Their
+        // occupancy is defined by the individually booked slots (stored in booking_answers), not by
+        // the option's own start/end, so those are skipped below and the booked slots added instead.
+        $slotoptionids = [];
+        if (!empty($areas['option'])) {
+            foreach ($areas['option'] as $candidateoptionid) {
+                $candidatesettings = singleton_service::get_instance_of_booking_option_settings((int)$candidateoptionid);
+                if (!empty($candidatesettings) && !empty($candidatesettings->slotconfig)) {
+                    $slotoptionids[] = (int)$candidateoptionid;
+                }
+            }
+        }
+
         // Bring the result in the correct form.
         foreach ($records as $record) {
+            // Slot options expose their occupancy via booked slots (added after this loop), not
+            // via the option-level start/end, so skip the option-level row here.
+            if ($record->area === 'option' && in_array((int)$record->instanceid, $slotoptionids, true)) {
+                continue;
+            }
+
             $optionsettings = singleton_service::get_instance_of_booking_option_settings($record->optionid);
 
             if (!modechecker::is_ajax_or_webservice_request()) {
@@ -1576,6 +1622,143 @@ class booking {
             $returnarray[] = $newentittydate;
         }
 
+        // Fallback: an entity linked at OPTION level occupies ALL of its option's session times.
+        // The query above only returns the option-level row for options WITHOUT optiondates; for
+        // options WITH optiondates we emit each session's time here, so an option-level entity
+        // (e.g. equipment, or a room linked once for the whole option) applies to every session.
+        // Optiondates that carry their OWN relation (already requested via $areas['optiondate'])
+        // override and are skipped, implementing the optiondate-overrides-option fallback rule.
+        if (!empty($areas['option'])) {
+            $explicitoptiondates = array_flip(array_map('intval', $areas['optiondate'] ?? []));
+            foreach ($areas['option'] as $optionlevelid) {
+                $optionlevelid = (int)$optionlevelid;
+                if (in_array($optionlevelid, $slotoptionids, true)) {
+                    continue; // Slot options expose occupancy via booked slots, handled below.
+                }
+
+                $optiondates = $DB->get_records(
+                    'booking_optiondates',
+                    ['optionid' => $optionlevelid],
+                    '',
+                    'id, coursestarttime, courseendtime'
+                );
+                if (empty($optiondates)) {
+                    continue; // No optiondates → the option-level row was already returned above.
+                }
+
+                $optionsettings = singleton_service::get_instance_of_booking_option_settings($optionlevelid);
+                if (empty($optionsettings)) {
+                    continue;
+                }
+
+                $isinvisible = !empty($optionsettings->invisible) ? true : false;
+                if (
+                    $isinvisible && !has_capability(
+                        'mod/booking:canseeinvisibleoptions',
+                        context_module::instance($optionsettings->cmid)
+                    )
+                ) {
+                    continue;
+                }
+
+                if (!modechecker::is_ajax_or_webservice_request()) {
+                    $returnurl = $PAGE->url->out();
+                } else {
+                    $returnurl = '/';
+                }
+                $link = new moodle_url("/mod/booking/optionview.php", [
+                    "optionid" => (int)$optionsettings->id,
+                    "cmid" => (int)$optionsettings->cmid,
+                    "userid" => (int)$USER->id,
+                    'returnto' => 'url',
+                    'returnurl' => $returnurl,
+                ]);
+                $bgcolor = $isinvisible ? "#808080" : "#4285F4";
+                $optiontitle = $optionsettings->get_title_with_prefix();
+                if ($isinvisible) {
+                    $optiontitle = "[" . get_string('invisible', 'mod_booking') . "] " . $optiontitle;
+                }
+
+                foreach ($optiondates as $optiondate) {
+                    if (isset($explicitoptiondates[(int)$optiondate->id])) {
+                        continue; // Optiondate overrides with its own entity relation.
+                    }
+                    if (empty($optiondate->coursestarttime) || empty($optiondate->courseendtime)) {
+                        continue;
+                    }
+                    $returnarray[] = new entitydate(
+                        $optionlevelid,
+                        'mod_booking',
+                        'option',
+                        $optiontitle,
+                        (int)$optiondate->coursestarttime,
+                        (int)$optiondate->courseendtime,
+                        0,
+                        $link,
+                        $bgcolor
+                    );
+                }
+            }
+        }
+
+        // Append the actually booked slots of slotbooking options as occupancy dates, so they
+        // block overlapping dates/slots of other options that share the same entity.
+        foreach ($slotoptionids as $slotoptionid) {
+            $bookedranges = slot_availability::get_booked_slot_ranges_for_option($slotoptionid);
+            if (empty($bookedranges)) {
+                continue;
+            }
+
+            $optionsettings = singleton_service::get_instance_of_booking_option_settings($slotoptionid);
+            if (empty($optionsettings)) {
+                continue;
+            }
+
+            $isinvisible = !empty($optionsettings->invisible) ? true : false;
+            if (
+                $isinvisible && !has_capability(
+                    'mod/booking:canseeinvisibleoptions',
+                    context_module::instance($optionsettings->cmid)
+                )
+            ) {
+                continue;
+            }
+
+            if (!modechecker::is_ajax_or_webservice_request()) {
+                $returnurl = $PAGE->url->out();
+            } else {
+                $returnurl = '/';
+            }
+
+            $link = new moodle_url("/mod/booking/optionview.php", [
+                "optionid" => (int)$optionsettings->id,
+                "cmid" => (int)$optionsettings->cmid,
+                "userid" => (int)$USER->id,
+                'returnto' => 'url',
+                'returnurl' => $returnurl,
+            ]);
+
+            $bgcolor = $isinvisible ? "#808080" : "#4285F4";
+            $optiontitle = $optionsettings->get_title_with_prefix();
+            if ($isinvisible) {
+                $optiontitle = "[" . get_string('invisible', 'mod_booking') . "] " . $optiontitle;
+            }
+
+            foreach ($bookedranges as $range) {
+                $returnarray[] = new entitydate(
+                    (int)$optionsettings->id,
+                    'mod_booking',
+                    'slot',
+                    $optiontitle,
+                    (int)$range['start'],
+                    (int)$range['end'],
+                    0,
+                    $link,
+                    $bgcolor
+                );
+            }
+        }
+
         return $returnarray;
     }
 
@@ -1599,10 +1782,11 @@ class booking {
                         bo.text,
                         bo.status,
                         bod.coursestarttime,
-                        bod.courseendtime
+                        bod.courseendtime,
+                        bo.type
                     FROM {booking_optiondates} bod
                     JOIN (
-                        SELECT id, text, status
+                        SELECT id, text, status, type
                         FROM {booking_options}
                     ) bo
                     ON bod.optionid = bo.id
@@ -1615,7 +1799,8 @@ class booking {
                     text,
                     status,
                     coursestarttime,
-                    courseendtime
+                    courseendtime,
+                    type
                     FROM {booking_options}
             ) s1
             LEFT JOIN (
@@ -1890,50 +2075,6 @@ class booking {
     }
 
     /**
-     * Helper function to generate label descriptions, e.g. for navigation elements.
-     * @param string $prefix prefix for classes, e.g. the name of the moodle page like "report2"
-     * @param array $scopes an array of scopes, e.g. ["option", "instance", "course", "system"]
-     * @return string styling css embedded in html (with surrounding <style> element)
-     */
-    public static function generate_localized_css_for_navigation_labels(string $prefix, array $scopes) {
-        $css = "";
-
-        $last = end($scopes);
-
-        foreach ($scopes as $scope) {
-            $islast = ($last == $scope);
-            $css .= '
-            .' . $prefix . "-" . $scope . '-border::before {
-                content: "' . get_string($prefix . 'label' . $scope, 'mod_booking') . '";
-                position: absolute;
-                top: -10px;
-                left: 5px;
-                padding: 0 3px;
-                font-weight: 200;
-                font-size: small;
-                background-color: white;
-                color: ' . ($islast ? '#000' : '#333') . ';
-                white-space: nowrap;
-            }
-            .' . $prefix . '-' . $scope . '-border {
-                display: inline-block;
-                position: relative;
-                padding: 10px 20px;
-                margin-bottom: 10px;
-                border: ' . ($islast ? '1px solid black' : '1px dashed gray') . ';
-                border-radius: 5px;
-                color: ' . ($islast ? '#0f6cbf' : 'gray') . ';
-                font-size: large;
-                font-weight: lighter;
-                white-space: nowrap;
-            }
-            ';
-        }
-
-        return "<style>$css</style>";
-    }
-
-    /**
      * Helper function to shorten long texts and add 3 dots "..." at the end.
      * @param string $text input text to be shortened
      * @param int $length maximum length after which the "..." should be added
@@ -2048,6 +2189,7 @@ class booking {
             MOD_BOOKING_STATUSPARAM_NOTES_EDITED => get_string('notesedited', 'mod_booking'),
             MOD_BOOKING_STATUSPARAM_COMPLETION_CHANGED => get_string('completionchanged', 'mod_booking'),
             MOD_BOOKING_STATUSPARAM_CONFIRMATION_DELETED => get_string('confirmationdeleted', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_CUSTOMFORM_EDITED => get_string('customformedited', 'mod_booking'),
         ];
     }
 

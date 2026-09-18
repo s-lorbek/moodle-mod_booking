@@ -25,6 +25,7 @@
 namespace mod_booking\booking_answers\scopes;
 
 use context_system;
+use local_wunderbyte_table\filters\types\standardfilter;
 use local_wunderbyte_table\wunderbyte_table;
 use mod_booking\booking_answers\scope_base_answers;
 use mod_booking\output\booked_users;
@@ -83,6 +84,9 @@ class systemanswers extends scope_base_answers {
             'statustocount' => get_config('booking', 'bookingstrackerpresencecountervaluetocount'),
         ];
 
+        // A booking extension can limit the answers the current user may see (e.g. their team).
+        $where .= $this->get_answers_restriction_sql('userid', $scopeid, $params);
+
         return [$fields, $from, $where, $params];
     }
 
@@ -132,30 +136,26 @@ class systemanswers extends scope_base_answers {
 
         $this->show_download_button($table, $scope, $scopeid, $statusparam);
 
-        $table->define_fulltextsearchcolumns(['titleprefix', 'text', 'firstname', 'lastname', 'email']);
+        $table->define_fulltextsearchcolumns(['titleprefix', 'text', 'instancename', 'firstname', 'lastname', 'email']);
         $sortablecolumns = [
             'titleprefix' => get_string('titleprefix', 'mod_booking'),
             'text' => get_string('bookingoption', 'mod_booking'),
+            'instancename' => get_string('bookinginstance', 'mod_booking'),
             'firstname' => get_string('firstname', 'core'),
             'lastname' => get_string('lastname', 'core'),
             'email' => get_string('email', 'core'),
         ];
-        if ($statusparam == 0) {
-            $sortablecolumns['presencecount'] = get_string('presencecount', 'mod_booking');
-            $sortablecolumns['status'] = get_string('presence', 'mod_booking');
-            $sortablecolumns['notes'] = get_string('notes', 'mod_booking');
-        }
+        $sortablecolumns['timebooked'] = get_string('bookingdate', 'mod_booking');
         $sortablecolumns['timemodified'] = get_string('timemodified', 'mod_booking');
         $table->define_sortablecolumns($sortablecolumns);
         $table->sort_default_column = 'timemodified';
         $table->sort_default_order = SORT_DESC;
 
-        if (
-            $statusparam == MOD_BOOKING_STATUSPARAM_BOOKED
-            && !empty($certificatebutton = booked_users::create_certificate_button())
-        ) {
-            $table->actionbuttons[] = $certificatebutton;
-        }
+        // Filter for the booking instance.
+        $instancefilter = new standardfilter('instancename', get_string('bookinginstance', 'mod_booking'));
+        $table->add_filter($instancefilter);
+        $table->showfilterontop = true;
+
         if ($statusparam != MOD_BOOKING_STATUSPARAM_DELETED) {
             $table->addcheckboxes = true;
 
@@ -188,7 +188,7 @@ class systemanswers extends scope_base_answers {
      *
      */
     public function show_download_button(wunderbyte_table &$table, string $scope, int $scopeid, int $statusparam) {
-        if ($this->has_capability_in_scope($scopeid, 'mod/booking:updatebooking')) {
+        if ($this->has_capability_in_scope($scopeid, 'mod/booking:downloadresponses')) {
             $baseurl = new moodle_url(
                 '/mod/booking/download_report2.php',
                 [

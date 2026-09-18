@@ -18,7 +18,7 @@ namespace mod_booking\signinsheet;
 use mod_booking\booking_option_settings;
 use mod_booking\option\fields\sharedplaces;
 use mod_booking\singleton_service;
-use Exception;
+use local_wunderbyte_table\local\pdf\pdfa_pdf;
 use user_picture;
 use stdClass;
 
@@ -280,7 +280,13 @@ class signinsheet_generator {
             $this->cfgcustfields = explode(',', $cfgcustfields);
         }
 
-        $this->allfields = explode(',', $this->bookingoption->booking->settings->signinsheetfields);
+        // The instance setting is null as long as it was never configured (e.g. a
+        // freshly created instance): explode(null) would raise a deprecation, and an
+        // empty entry would end up as "u. " in the user SQL.
+        $this->allfields = array_values(array_filter(
+            explode(',', $this->bookingoption->booking->settings->signinsheetfields ?? ''),
+            'strlen'
+        ));
         if (get_config('booking', 'numberrows') == 1) {
             $this->showrownumbers = true;
             $this->rownumber = 0;
@@ -338,6 +344,28 @@ class signinsheet_generator {
      * @return void
      */
     public function prepare_html() {
+        $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
+        $htmloutput = $this->render_html();
+
+        // Output the document in the specified format.
+        switch ($this->saveasformat) {
+            case 'word':
+                $this->download_word_from_html($htmloutput, $settings);
+                break;
+            case 'pdf':
+            default:
+                $this->download_pdf_from_html($htmloutput, $settings);
+                break;
+        }
+    }
+
+    /**
+     * Renders the sign-in sheet HTML from the configured template (setting signinsheethtml,
+     * default template as fallback): user rows, session columns, logo and title.
+     *
+     * @return string the HTML the PDF / Word document is generated from
+     */
+    public function render_html(): string {
         global $DB, $PAGE;
         $addsqlwhere = '';
         $groupparams = [];
@@ -435,23 +463,9 @@ class signinsheet_generator {
         preg_match('/\[\[users\]\](.*?)\[\[\/users\]\]/s', $confightml, $matches);
         $usertemplate = isset($matches[1]) ? $matches[1] : '';
 
-        if ($this->pdfsessions == -1) {
-                $dates = get_string('signinsheetdatetofillin', 'booking') . ": ________________________";
-        }
-
         $extrasessioncols = $this->get_extra_session_columns();
         if (!empty($extrasessioncols)) {
             $this->allfields = array_unique(array_merge($this->allfields, $extrasessioncols));
-        }
-
-        // Session handling logic.
-        if ($this->pdfsessions == 0) {
-            // Logic to integrate based on existing session data.
-            $val = [];
-            foreach ($this->sessions as $session) {
-                $val[] = userdate($session->coursestarttime) . " - " . userdate($session->courseendtime);
-            }
-            $dates = implode(", ", $val);
         }
 
         // Generate session header columns with vertical text.
@@ -546,41 +560,30 @@ class signinsheet_generator {
 
         $dayofweektime = !empty($settings->dayofweektime) ? $settings->dayofweektime : '';
         $teachers = !empty($this->teachers) ? implode(', ', $this->teachers) : '';
-        $dates = $this->pdfsessions != -1 && $this->pdfsessions != -2 ? $this->sessionsstring : '';
+        // The sessionsstring separates multiple sessions with "\n" (for the
+        // classic PDF MultiCell); in HTML they need to become <br> tags.
+        $dates = $this->pdfsessions != -1 && $this->pdfsessions != -2 ? nl2br($this->sessionsstring) : '';
 
         $htmloutput = str_replace('[[location]]', $location, $htmloutput);
         $htmloutput = str_replace('[[dayofweektime]]', $dayofweektime, $htmloutput);
         $htmloutput = str_replace('[[teachers]]', $teachers, $htmloutput);
         $htmloutput = str_replace('[[dates]]', $dates, $htmloutput);
-        // Add the logo URL to HTML.
+        // Add the logo to the HTML as a data URI, so TCPDF and PhpWord can render
+        // it without fetching a pluginfile URL (which would require a login session).
         if ($this->get_signinsheet_logo()) {
-            $url = \moodle_url::make_pluginfile_url(
-                $this->signinsheetlogo->get_contextid(),
-                $this->signinsheetlogo->get_component(),
-                $this->signinsheetlogo->get_filearea(),
-                $this->signinsheetlogo->get_itemid(),
-                $this->signinsheetlogo->get_filepath(),
-                $this->signinsheetlogo->get_filename()
-            );
-            $src = $url->out();
+            $src = 'data:' . $this->signinsheetlogo->get_mimetype() . ';base64,' .
+                base64_encode($this->signinsheetlogo->get_content());
             $htmloutput = str_replace('[[logourl]]', $src, $htmloutput);
+        } else {
+            // No logo configured: drop the img tag, an unresolved placeholder would make PhpWord throw.
+            $htmloutput = preg_replace('/<img[^>]*\[\[logourl\]\][^>]*>/i', '', $htmloutput);
+            $htmloutput = str_replace('[[logourl]]', '', $htmloutput);
         }
 
         // Replace table name placeholder.
         $htmloutput = str_replace('[[tablename]]', $headertitle, $htmloutput);
 
-        // Output the document in the specified format.
-        switch ($this->saveasformat) {
-            case 'pdf':
-                $this->download_pdf_from_html($htmloutput, $settings);
-                break;
-            case 'word':
-                $this->download_word_from_html($htmloutput, $settings);
-                break;
-            default:
-                $this->download_pdf_from_html($htmloutput, $settings);
-                break;
-        }
+        return $htmloutput;
     }
 
     /**
@@ -610,20 +613,17 @@ class signinsheet_generator {
     }
 
     /**
-     * Converts HTML content to a Word document and downloads it
+     * Converts HTML content to a Word document and sends it as forced download.
+     *
+     * The document is built with the PHPWord library; the download filename is
+     * based on the booking option title. Does not return.
      *
      * @param string $htmloutput The HTML content to convert to Word format
      * @param object $settings The booking option settings object containing title information
      *
-     * Takes HTML content, converts it to a Word document using PHPWord library,
-     * saves it to a temporary file and forces download of the resulting .docx file.
-     * The filename is based on the booking option title.
-     *
-     * @throws Exception If file cannot be read or downloaded
      * @return void
      */
     private function download_word_from_html($htmloutput, $settings) {
-        global $DB, $PAGE;
         $worddoc = new \PhpOffice\PhpWord\PhpWord();
         \PhpOffice\PhpWord\Settings::setOutputEscapingEnabled(true);
         $pageorientation = ($this->orientation === 'L') ? 'landscape' : 'portrait';
@@ -633,44 +633,40 @@ class signinsheet_generator {
         $section = $worddoc->addSection($sectionstyle);
 
         \PhpOffice\PhpWord\Shared\Html::addHtml($section, $htmloutput, false, false);
-        $extrasessioncols = $this->get_extra_session_columns();
 
-        // Write the document to a temporary file.
-        $filename = $settings->get_title_with_prefix() . '.docx';
-        $temppath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $filename;
-        try {
-            // Save the document.
-            $worddoc->save($temppath, 'Word2007');
-            // Make sure any output buffers are clean.
-            if (ob_get_contents()) {
-                ob_end_clean();
-            }
-            // Check file exists and is readable.
-            if (file_exists($temppath) && is_readable($temppath)) {
-                // Set headers for download.
-                header("Content-Description: File Transfer");
-                header("Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-                header('Content-Disposition: attachment; filename="' . basename($filename) . '"');
-                header("Cache-Control: must-revalidate");
-                header("Expires: 0");
-                header("Pragma: public");
-                header("Content-Length: " . filesize($temppath));
-                // Clear output buffer and stream the file.
-                ob_clean();
-                flush();
-                readfile($temppath);
-                // Proper exit.
-                exit;
-            } else {
-                throw new Exception("File could not be read.");
-            }
-        } catch (Exception $e) {
-            // Handle and log exceptions.
-            echo "An error occurred while downloading the document: " . $e->getMessage();
-        }
+        // PhpWord can only write the docx (a zip archive) to a real file, so use a
+        // per-request directory: Moodle removes it automatically after the request,
+        // and send_temp_file() unlinks the file right after streaming it.
+        $downloadfilename = self::get_clean_filename($settings->get_title_with_prefix()) . '.docx';
+        $temppath = make_request_directory() . '/' . $downloadfilename;
+        $worddoc->save($temppath, 'Word2007');
+        send_temp_file($temppath, $downloadfilename);
     }
 
 
+
+    /**
+     * Builds the sign-in sheet PDF document from the given HTML.
+     *
+     * With the setting local_wunderbyte_table/pdfaenabled the document is PDF/A-2b (see {@see pdfa_pdf}:
+     * all fonts embedded, core font names in the template mapped to the embeddable
+     * FreeFonts); otherwise it is generated exactly as before.
+     *
+     * @param string $htmloutput HTML as returned by render_html()
+     * @return \pdf the finished document, ready for Output()
+     */
+    public function create_pdf_from_html(string $htmloutput): \pdf {
+        if (pdfa_pdf::enabled()) {
+            $pdf = new pdfa_pdf($this->orientation, PDF_UNIT, PDF_PAGE_FORMAT);
+        } else {
+            $pdf = new signin_pdf($this->orientation, PDF_UNIT, PDF_PAGE_FORMAT);
+        }
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->AddPage();
+        $pdf->writeHTML($htmloutput, true, false, true, false, '');
+        return $pdf;
+    }
 
     /**
      * Download PDF File from given html
@@ -682,20 +678,25 @@ class signinsheet_generator {
      *
      */
     private function download_pdf_from_html($htmloutput, $settings) {
-        $pdf = new signin_pdf($this->orientation, PDF_UNIT, PDF_PAGE_FORMAT);
-        $pdf->setPrintHeader(false);
-        $pdf->setPrintFooter(false);
-        $pdf->AddPage();
-        $pdf->writeHTML($htmloutput, true, false, true, false, '');
-        $filenamepdf = $settings->get_title_with_prefix() . '.pdf';
-        $pdf->Output(sys_get_temp_dir() . DIRECTORY_SEPARATOR . $filenamepdf, 'F');
-        $downloadfilename = $settings->get_title_with_prefix();
-        // Replace special characters to prevent errors.
-        $downloadfilename = str_replace(' ', '_', $downloadfilename); // Replaces all spaces with underscores.
-        $downloadfilename = preg_replace('/[^A-Za-z0-9\_]/', '', $downloadfilename); // Removes special chars.
-        $downloadfilename = preg_replace('/\_+/', '_', $downloadfilename); // Replace multiple underscores with exactly one.
-        $downloadfilename = format_string($downloadfilename);
+        $pdf = $this->create_pdf_from_html((string)$htmloutput);
+        $downloadfilename = self::get_clean_filename($settings->get_title_with_prefix());
         $pdf->Output($downloadfilename . '.pdf', 'D');
+    }
+
+    /**
+     * Reduce the booking option title to a filename-safe ASCII string.
+     * Raw titles can contain slashes, quotes etc., which break file paths
+     * and the Content-Disposition header.
+     *
+     * @param string $title
+     * @return string filename without extension, never empty
+     */
+    private static function get_clean_filename(string $title): string {
+        $filename = str_replace(' ', '_', $title);
+        $filename = preg_replace('/[^A-Za-z0-9\_]/', '', $filename); // Removes special chars.
+        $filename = preg_replace('/\_+/', '_', $filename); // Replace multiple underscores with exactly one.
+        $filename = trim($filename, '_');
+        return $filename !== '' ? $filename : 'signinsheet';
     }
 
 
@@ -1035,13 +1036,7 @@ class signinsheet_generator {
             $this->pdf->SetY($this->pdf->GetY() + 5);
         }
 
-        $downloadfilename = $settings->get_title_with_prefix();
-        // Replace special characters to prevent errors.
-        $downloadfilename = str_replace(' ', '_', $downloadfilename); // Replaces all spaces with underscores.
-        $downloadfilename = preg_replace('/[^A-Za-z0-9\_]/', '', $downloadfilename); // Removes special chars.
-        $downloadfilename = preg_replace('/\_+/', '_', $downloadfilename); // Replace multiple underscores with exactly one.
-        $downloadfilename = format_string($downloadfilename);
-
+        $downloadfilename = self::get_clean_filename($settings->get_title_with_prefix());
         $this->pdf->Output($downloadfilename . '.pdf', 'D');
     }
 

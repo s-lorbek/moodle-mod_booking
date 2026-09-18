@@ -29,6 +29,7 @@ use core\exception\moodle_exception;
 use local_wunderbyte_table\wunderbyte_table;
 use mod_booking\booking_option_settings;
 use mod_booking\customfield\booking_handler;
+use mod_booking\local\bookingworkflow\answersrestriction;
 use moodle_url;
 
 /**
@@ -56,13 +57,41 @@ class scope_base {
      * This functions defines the columns for each scope.
      *
      * @param int $statusparam
+     * @param int $scopeid
      *
      * @return array
      *
      */
-    public function return_cols_for_tables(int $statusparam): array {
+    public function return_cols_for_tables(int $statusparam, int $scopeid = 0): array {
         // Actual implementation in subclasses.
         return [];
+    }
+
+    /**
+     * This functions defines the columns for the table download of each scope.
+     * By default, the download uses the same columns as the displayed table.
+     * Scopes supporting the per-instance setting reportfields override this.
+     *
+     * @param int $statusparam
+     * @param int $scopeid
+     *
+     * @return array
+     *
+     */
+    public function return_cols_for_download(int $statusparam, int $scopeid = 0): array {
+        return $this->return_cols_for_tables($statusparam, $scopeid);
+    }
+
+    /**
+     * Resolves the cmid of the booking instance for the given scopeid.
+     * Returns 0 if the scope cannot be resolved to a single booking instance
+     * (e.g. course or system scope).
+     *
+     * @param int $scopeid
+     * @return int
+     */
+    public function get_cmid_for_scopeid(int $scopeid): int {
+        return 0;
     }
 
     /**
@@ -80,12 +109,14 @@ class scope_base {
         $ba = new booking_answers();
         /** @var \mod_booking\booking_answers\scope_base $class */
         $class = $ba->return_class_for_scope($scope);
-        if ($class->has_capability_in_scope($scopeid, 'mod/booking:updatebooking')) {
+        // Same capability that gated the table export on the old report.php.
+        if ($class->has_capability_in_scope($scopeid, 'mod/booking:downloadresponses')) {
             $baseurl = new moodle_url(
                 '/mod/booking/download_report2.php',
                 [
                     'scope' => $scope,
                     'statusparam' => $statusparam,
+                    'scopeid' => $scopeid,
                 ]
             );
             $table->define_baseurl($baseurl);
@@ -145,6 +176,40 @@ class scope_base {
      */
     public function has_capability_in_scope($scopeid, $capability) {
         return has_capability($capability, context_system::instance());
+    }
+
+    /**
+     * Returns the sql restricting the visible booking answers to the users a booking
+     * extension allows the current user to see (e.g. a supervisor and their team).
+     *
+     * Returns an empty string if no extension restricts the current user, so the scopes
+     * can simply append the result to their where clause. New params are merged into the
+     * provided params array, they are prefixed with "teamuid" to avoid collisions.
+     *
+     * @param string $useridcolumn the column holding the userid of the booking answer
+     * @param int $scopeid optionid | optiondateid | cmid | courseid | 0
+     * @param array $params
+     * @return string
+     */
+    public function get_answers_restriction_sql(string $useridcolumn, int $scopeid, array &$params): string {
+        global $DB;
+
+        $userids = answersrestriction::get_visible_user_ids($this, $scopeid);
+
+        if ($userids === null) {
+            // The current user is not restricted at all.
+            return '';
+        }
+
+        if (empty($userids)) {
+            // The current user is restricted, but there is nobody to show.
+            return " AND 1 = 0 ";
+        }
+
+        [$insql, $inparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'teamuid');
+        $params = array_merge($params, $inparams);
+
+        return " AND $useridcolumn $insql ";
     }
 
     /**
@@ -211,5 +276,32 @@ class scope_base {
         $params = array_merge($params, $params1);
 
         return [$fields, $from, $where ?? '', $params];
+    }
+
+    /**
+     * Defines the sortable columns of a users table, using the headers as localized labels.
+     *
+     * Action columns are only created by a col_ function on rendering, they have no counterpart in the sql.
+     * Sorting by them would end up in "ORDER BY action_..." and break the query, so we exclude them.
+     *
+     * @param wunderbyte_table $table
+     * @param array $columns
+     * @param array $headers
+     *
+     * @return void
+     *
+     */
+    public function define_sortablecolumns_from_columns(wunderbyte_table $table, array $columns, array $headers = []) {
+
+        $sortablecolumns = [];
+        foreach ($columns as $index => $columnkey) {
+            if (str_starts_with($columnkey, 'action_')) {
+                // Make sure sorting is not possible, even if the column is requested via the tsort param.
+                $table->no_sorting($columnkey);
+                continue;
+            }
+            $sortablecolumns[$columnkey] = $headers[$index] ?? $columnkey;
+        }
+        $table->define_sortablecolumns($sortablecolumns);
     }
 }

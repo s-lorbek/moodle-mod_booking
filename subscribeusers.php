@@ -30,6 +30,8 @@ require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot . '/mod/booking/locallib.php');
 
 use core\output\notification;
+use mod_booking\bo_availability\bo_info;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_utils;
 use mod_booking\form\subscribe_cohort_or_group_form;
 use mod_booking\output\booked_users;
@@ -37,6 +39,7 @@ use mod_booking\output\renderer;
 use mod_booking\singleton_service;
 use mod_booking\booking_existing_user_selector;
 use mod_booking\booking_potential_user_selector;
+use mod_booking\local\bookingworkflow\answersrestriction;
 use mod_booking\local\bookingworkflow\bookforothers;
 
 global $CFG, $DB, $COURSE, $PAGE, $OUTPUT;
@@ -149,13 +152,29 @@ if (!$agree && empty($formsubmitted) && (!empty($bookingoption->booking->setting
     echo $OUTPUT->footer();
     die();
 } else {
+    // A booking extension can limit the answers the current user may see (e.g. a supervisor who
+    // only sees their own team). The list of booked users displays exactly those answers, so it
+    // follows the same restriction as the tables of the bookings tracker. Filtering happens here
+    // and not in booking_option::update_booked_users(), because the counters, the ranking of the
+    // waiting list and the list of potential users are all derived from the unfiltered data.
+    $restricttovisibleusers = function (array $users) use ($optionid): array {
+        $visibleuserids = answersrestriction::get_visible_user_ids(
+            (new booking_answers())->return_class_for_scope('option'),
+            $optionid
+        );
+        if ($visibleuserids === null) {
+            return $users;
+        }
+        return array_intersect_key($users, array_flip($visibleuserids));
+    };
+
     $subscribeduseroptions = [
         'bookingid' => $cm->instance,
         'accesscontext' => $context,
         'optionid' => $optionid,
         'cm' => $cm,
         'course' => $course,
-        'potentialusers' => $bookingoption->bookedvisibleusers,
+        'potentialusers' => $restricttovisibleusers($bookingoption->bookedvisibleusers),
     ];
     $potentialuseroptions = $subscribeduseroptions;
 
@@ -179,7 +198,100 @@ if (!$agree && empty($formsubmitted) && (!empty($bookingoption->booking->setting
                 has_capability('mod/booking:subscribeusers', $context) ||
                 (booking_check_if_teacher($bookingoption->option))
             ) {
+                // The global setting decides how this page treats availability conditions
+                // which the selected users do not meet (ignore, warn & confirm, or block).
+                $condmode = (int)get_config('booking', 'bookotherusersavailability');
+                $unmetconditions = [];
+                if ($condmode != MOD_BOOKING_BOOKOTHERUSERS_COND_IGNORE) {
+                    foreach ($users as $user) {
+                        $unmet = bo_info::get_unmet_availability_conditions($optionid, $user->id);
+                        if (!empty($unmet)) {
+                            $unmetconditions[$user->id] = $unmet;
+                        }
+                    }
+                }
+
+                // Renders "Firstname Lastname: condition descriptions" for one user. When the max
+                // number of bookings per user is among the blockers, the options the user already
+                // booked are appended, so the agent knows what they confirm resp. why it blocks.
+                $formatunmetuser = function ($user, array $descriptions) use ($DB, $bookingoption): string {
+                    $item = "{$user->firstname} {$user->lastname}: " . implode('; ', $descriptions);
+                    if (isset($descriptions[MOD_BOOKING_BO_COND_MAX_NUMBER_OF_BOOKINGS])) {
+                        $bookedoptions = $DB->get_records_sql(
+                            'SELECT ba.id answerid, bo.text
+                            FROM {booking_answers} ba
+                            LEFT JOIN {booking_options} bo ON bo.id = ba.optionid
+                            WHERE ba.userid = ? AND ba.waitinglist < ?
+                            AND ba.bookingid = ?',
+                            [
+                                $user->id,
+                                MOD_BOOKING_STATUSPARAM_RESERVED,
+                                $bookingoption->booking->id,
+                            ]
+                        );
+                        if (!empty($bookedoptions)) {
+                            $optionnames = array_map('format_string', array_column($bookedoptions, 'text'));
+                            $item .= ' (' . get_string('enrolledinoptions', 'mod_booking')
+                                . implode(', ', $optionnames) . ')';
+                        }
+                    }
+                    return $item;
+                };
+
+                if (
+                    $condmode == MOD_BOOKING_BOOKOTHERUSERS_COND_WARN
+                    && !empty($unmetconditions)
+                    && !optional_param('confirmcondwarning', false, PARAM_BOOL)
+                ) {
+                    // The booking agent has to confirm the warning first. Confirming re-submits
+                    // the very same selection with the confirmation flag set.
+                    echo $OUTPUT->header();
+                    echo $OUTPUT->heading(format_string($optionsettings->get_title_with_prefix()), 3);
+
+                    $items = [];
+                    foreach ($unmetconditions as $unmetuserid => $descriptions) {
+                        $items[] = $formatunmetuser($users[$unmetuserid], $descriptions);
+                    }
+                    $message = html_writer::tag('p', get_string('bookotherusersavailabilitywarning', 'mod_booking'));
+                    $message .= html_writer::alist($items);
+                    $message .= html_writer::tag('p', get_string('bookotherusersavailabilitywarningconfirm', 'mod_booking'));
+
+                    $continueparams = [
+                        'id' => $id,
+                        'optionid' => $optionid,
+                        'agree' => 1,
+                        'subscribe' => 1,
+                        'confirmcondwarning' => 1,
+                        'sesskey' => sesskey(),
+                    ];
+                    $i = 0;
+                    foreach (array_keys($users) as $selecteduserid) {
+                        $continueparams["addselect[$i]"] = $selecteduserid;
+                        $i++;
+                    }
+                    $continueurl = new moodle_url('/mod/booking/subscribeusers.php', $continueparams);
+                    $continue = new single_button(
+                        $continueurl,
+                        get_string('bookotherusersavailabilitybookanyway', 'mod_booking'),
+                        'post'
+                    );
+                    $cancel = new single_button($url, get_string('cancel'), 'get');
+                    echo $OUTPUT->confirm($message, $continue, $cancel);
+                    echo $OUTPUT->footer();
+                    die();
+                }
+
+                $blockedusers = [];
                 foreach ($users as $user) {
+                    // In blocking mode, users who do not meet the availability conditions are not booked.
+                    if (
+                        $condmode == MOD_BOOKING_BOOKOTHERUSERS_COND_BLOCK
+                        && isset($unmetconditions[$user->id])
+                    ) {
+                        $subscribesuccess = false;
+                        $blockedusers[] = $user;
+                        continue;
+                    }
                     // Restrict who this agent may actually book for (eg. supervisors and their own team).
                     [$allowedtobook, ] = bookforothers::check_booking_capability($optionid, $USER->id, $user->id);
                     if (!$allowedtobook) {
@@ -199,7 +311,22 @@ if (!$agree && empty($formsubmitted) && (!empty($bookingoption->booking->setting
                         $status = 0;
                     }
 
-                    if (!$bookingoption->user_submit_response($user, 0, 0, $status, MOD_BOOKING_VERIFIED)) {
+                    // A confirmed warning also overrides the "max number of bookings per user"
+                    // limit of the instance: the warning named the options the user already
+                    // booked and the agent confirmed to book anyway.
+                    $skipuserlimitcheck = $condmode == MOD_BOOKING_BOOKOTHERUSERS_COND_WARN
+                        && isset($unmetconditions[$user->id][MOD_BOOKING_BO_COND_MAX_NUMBER_OF_BOOKINGS]);
+
+                    if (
+                        !$bookingoption->user_submit_response(
+                            $user,
+                            0,
+                            0,
+                            $status,
+                            MOD_BOOKING_VERIFIED,
+                            skipuserlimitcheck: $skipuserlimitcheck,
+                        )
+                    ) {
                         $subscribesuccess = false;
                         $notsubscribedusers[] = $user;
                     }
@@ -216,8 +343,16 @@ if (!$agree && empty($formsubmitted) && (!empty($bookingoption->booking->setting
                         5
                     );
                 } else {
-                    $output = '<br>';
+                    $messages = [];
+                    if (!empty($blockedusers)) {
+                        $blockedoutput = '<br>';
+                        foreach ($blockedusers as $user) {
+                            $blockedoutput .= $formatunmetuser($user, $unmetconditions[$user->id]) . '<br>';
+                        }
+                        $messages[] = get_string('bookotherusersavailabilityblocked', 'mod_booking', $blockedoutput);
+                    }
                     if (!empty($notsubscribedusers)) {
+                        $output = '<br>';
                         foreach ($notsubscribedusers as $user) {
                             $result = $DB->get_records_sql(
                                 'SELECT ba.id answerid, bo.text
@@ -242,8 +377,14 @@ if (!$agree && empty($formsubmitted) && (!empty($bookingoption->booking->setting
                             }
                             $output .= " <br>";
                         }
+                        $messages[] = get_string('notallbooked', 'mod_booking', $output);
                     }
-                    redirect($url, get_string('notallbooked', 'mod_booking', $output), 5);
+                    redirect(
+                        $url,
+                        implode('<br>', $messages),
+                        5,
+                        !empty($blockedusers) ? notification::NOTIFY_ERROR : notification::NOTIFY_INFO
+                    );
                 }
             } else {
                 throw new moodle_exception('invalidaction');
@@ -301,7 +442,7 @@ if (!$agree && empty($formsubmitted) && (!empty($bookingoption->booking->setting
         $existingselector->invalidate_selected_users();
         $bookingoption->update_booked_users();
         $subscriberselector->set_potential_users($bookingoption->potentialusers);
-        $existingselector->set_potential_users($bookingoption->bookedvisibleusers);
+        $existingselector->set_potential_users($restricttovisibleusers($bookingoption->bookedvisibleusers));
     }
 }
 
@@ -370,13 +511,26 @@ echo $OUTPUT->heading(format_string($optionsettings->get_title_with_prefix()), 3
 // Switch to turn booking of anyone ON or OFF.
 if (has_capability('mod/booking:bookanyone', $context) && $bookanyone) {
     set_user_preference('bookanyone', '1');
-    // Show button to turn it off again.
-    $url = new moodle_url('/mod/booking/subscribeusers.php', ['id' => $id,
-                                                                'optionid' => $optionid,
-                                                                'agree' => $agree,
-                                                            ]);
-    echo '<a class="btn btn-sm btn-light" href="' . $url . '">' . get_string('bookanyoneswitchoff', 'mod_booking') . '</a>';
-    echo '<div class="alert alert-warning p-1 mt-1 text-center">' . get_string('bookanyonewarning', 'mod_booking')  . '</div>';
+    if (get_config('booking', 'alwaysbookanyone')) {
+        // The global setting forces "book anyone", so a switch-off button would have no effect.
+        if (is_siteadmin()) {
+            $settingsurl = new moodle_url(
+                '/admin/settings.php',
+                ['section' => 'modsettingbooking'],
+                'admin-alwaysbookanyone'
+            );
+            echo '<div class="alert alert-light">' .
+                get_string('alwaysbookanyonealert', 'mod_booking', $settingsurl->out(false)) . '</div>';
+        }
+    } else {
+        // Show button to turn it off again.
+        $url = new moodle_url('/mod/booking/subscribeusers.php', ['id' => $id,
+                                                                    'optionid' => $optionid,
+                                                                    'agree' => $agree,
+                                                                ]);
+        echo '<a class="btn btn-sm btn-light" href="' . $url . '">' . get_string('bookanyoneswitchoff', 'mod_booking') . '</a>';
+        echo '<div class="alert alert-warning p-1 mt-1 text-center">' . get_string('bookanyonewarning', 'mod_booking')  . '</div>';
+    }
 } else if (has_capability('mod/booking:bookanyone', $context)) {
     set_user_preference('bookanyone', '0');
     // Show button to turn it off again.

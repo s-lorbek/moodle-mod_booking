@@ -30,6 +30,8 @@ use context_system;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\freezable_condition;
 use mod_booking\bo_availability\bo_info;
+use mod_booking\bo_availability\sqlfilter_form_support;
+use mod_booking\bo_availability\sqlfilter_relevance;
 use mod_booking\booking;
 use mod_booking\booking_option_settings;
 use mod_booking\local\override_user_field;
@@ -389,7 +391,7 @@ class userprofilefield_2_custom implements bo_condition, freezable_condition {
         if (empty($user)) {
             if ($databasetype == 'postgres') {
                 $where = "
-                availability IS NOT NULL
+                COALESCE(availability, '[]') IS NOT NULL
                 AND
                 (
                     (
@@ -403,19 +405,23 @@ class userprofilefield_2_custom implements bo_condition, freezable_condition {
                 return ['', '', '', $params, $where];
             } else if (
                 $databasetype == 'mysql'
-                && db_is_at_least_mariadb_106_or_mysql_8()
+                && booking_db_is_at_least_mariadb_106_or_mysql_8()
             ) {
+                // MySQL: JSON_TABLE must not read the availability column of the outer derived table (s1) - as soon as
+                // MySQL merges that derived table into the outer query, such a reference fails with
+                // "Incorrect arguments to JSON_TABLE". So we read the base table {booking_options} instead.
                 $where = "
-                    availability IS NOT NULL
+                    COALESCE(availability, '[]') IS NOT NULL
                     AND (
                         (
-                            NOT EXISTS (
-                                SELECT 1 FROM JSON_TABLE(availability, '\$[*]' COLUMNS (
+                            id NOT IN (
+                                SELECT bo_sf.id
+                                FROM {booking_options} bo_sf
+                                JOIN JSON_TABLE(bo_sf.availability, '\$[*]' COLUMNS (
                                     id INT PATH '\$.id',
                                     sqlfilter VARCHAR(10) PATH '\$.sqlfilter'
-                                )) AS jt
-                                WHERE jt.id = $conditionid
-                                AND jt.sqlfilter = '1'
+                                )) AS jt ON jt.id = $conditionid
+                                WHERE jt.sqlfilter = '1'
                             )
                         )
                     )";
@@ -426,10 +432,26 @@ class userprofilefield_2_custom implements bo_condition, freezable_condition {
         // Load custom profile fields.
         $user = singleton_service::get_instance_of_user($userid, true);
 
+        // Trim the profile fields to the shortnames any sqlfilter condition
+        // references site-wide: the operator builder embeds EVERY field value
+        // into the SQL params, so never-referenced fields would make the table
+        // cache key unique per user. Work on a clone - the singleton user must
+        // stay untouched.
+        $referencedfields = sqlfilter_relevance::referenced_values($conditionid);
+        $user = clone $user;
+        $trimmedprofile = [];
+        foreach ((array) ($user->profile ?? []) as $shortname => $value) {
+            if (in_array((string) $shortname, $referencedfields, true)) {
+                $trimmedprofile[$shortname] = $value;
+            }
+        }
+        ksort($trimmedprofile);
+        $user->profile = $trimmedprofile;
+
         // phpcs:disable
         if ($databasetype == 'postgres') {
             $where = "
-            availability IS NOT NULL
+            COALESCE(availability, '[]') IS NOT NULL
             AND
             (
                 (
@@ -508,19 +530,23 @@ class userprofilefield_2_custom implements bo_condition, freezable_condition {
             return ['', '', '', $params, $where];
         } else if (
             $databasetype == 'mysql'
-            && db_is_at_least_mariadb_106_or_mysql_8()
+            && booking_db_is_at_least_mariadb_106_or_mysql_8()
         ) {
+            // MySQL: JSON_TABLE must not read the availability column of the outer derived table (s1) - as soon as
+            // MySQL merges that derived table into the outer query, such a reference fails with
+            // "Incorrect arguments to JSON_TABLE". So we read the base table {booking_options} instead.
             $where = "
-                availability IS NOT NULL
+                COALESCE(availability, '[]') IS NOT NULL
                 AND (
                     (
-                        NOT EXISTS (
-                            SELECT 1 FROM JSON_TABLE(availability, '\$[*]' COLUMNS (
+                        id NOT IN (
+                            SELECT bo_sf.id
+                            FROM {booking_options} bo_sf
+                            JOIN JSON_TABLE(bo_sf.availability, '\$[*]' COLUMNS (
                                 id INT PATH '\$.id',
                                 sqlfilter VARCHAR(10) PATH '\$.sqlfilter'
-                            )) AS jt
-                            WHERE jt.id = $conditionid
-                            AND jt.sqlfilter = '1'
+                            )) AS jt ON jt.id = $conditionid
+                            WHERE jt.sqlfilter = '1'
                         )
                     )
                     OR (
@@ -605,6 +631,25 @@ class userprofilefield_2_custom implements bo_condition, freezable_condition {
     }
 
     /**
+     * Return the user values this condition references in the given availability
+     * entry. Used by the sqlfilter relevance service to trim the user data
+     * embedded into the filter SQL down to the site-wide relevant set.
+     *
+     * @param stdClass $entry availability json entry of this condition
+     * @return array referenced profile field shortnames
+     */
+    public static function sqlfilter_referenced_values(stdClass $entry): array {
+        $values = [];
+        if (!empty($entry->profilefield)) {
+            $values[] = (string) $entry->profilefield;
+        }
+        if (!empty($entry->profilefield2)) {
+            $values[] = (string) $entry->profilefield2;
+        }
+        return $values;
+    }
+
+    /**
      * The hard block is complementary to the is_available check.
      * While is_available is used to build eg also the prebooking modals and...
      * ... introduces eg the booking policy or the subbooking page, the hard block is meant to prevent ...
@@ -678,6 +723,7 @@ class userprofilefield_2_custom implements bo_condition, freezable_condition {
             'bo_cond_customuserprofilefield_operator2',
             'bo_cond_customuserprofilefield_value2',
             'bo_cond_customuserprofilefield_sqlfiltercheck',
+            'bo_cond_customuserprofilefield_sqlfiltercheck_disablednote',
             'bo_cond_customuserprofilefield_overrideconditioncheckbox',
             'bo_cond_customuserprofilefield_overrideoperator',
             'bo_cond_customuserprofilefield_overridecondition',
@@ -845,6 +891,14 @@ class userprofilefield_2_custom implements bo_condition, freezable_condition {
                     'bo_cond_userprofilefield_2_custom_restrict',
                     'notchecked'
                 );
+                $notename = sqlfilter_form_support::freeze_when_disabled(
+                    $mform,
+                    'bo_cond_customuserprofilefield_sqlfiltercheck'
+                );
+                if ($notename !== null) {
+                    $mform->hideIf($notename, 'bo_cond_customuserprofilefield_field', 'eq', 0);
+                    $mform->hideIf($notename, 'bo_cond_userprofilefield_2_custom_restrict', 'notchecked');
+                }
 
                 $mform->addElement(
                     'checkbox',

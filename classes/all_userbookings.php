@@ -99,6 +99,20 @@ class all_userbookings extends \table_sql {
     }
 
     /**
+     * This function is called for each data row to allow processing of the timebooked value.
+     * @param object $values
+     * @return string
+     * @throws coding_exception
+     */
+    protected function col_timebooked($values) {
+        if ($values->timebooked > 0) {
+            return userdate($values->timebooked);
+        }
+
+        return '';
+    }
+
+    /**
      * For status column.
      * @param object $values
      * @return string
@@ -259,12 +273,7 @@ class all_userbookings extends \table_sql {
      * @return string
      */
     protected function col_slotnumslots($values): string {
-        $slotdata = slot_answer::get_slot_data($values);
-        if (empty($slotdata['slots']) || !is_array($slotdata['slots'])) {
-            return '';
-        }
-
-        return (string)count($slotdata['slots']);
+        return slot_answer::render_numslots($values);
     }
 
     /**
@@ -274,19 +283,7 @@ class all_userbookings extends \table_sql {
      * @return string
      */
     protected function col_slotstarttime($values): string {
-        $slotdata = slot_answer::get_slot_data($values);
-        if (!empty($slotdata['slots']) && is_array($slotdata['slots'])) {
-            $firstslot = reset($slotdata['slots']);
-            if (is_array($firstslot) && !empty($firstslot['start'])) {
-                return userdate((int)$firstslot['start'], get_string('strftimedatetime', 'langconfig'));
-            }
-        }
-
-        if (!empty($values->startdate)) {
-            return userdate((int)$values->startdate, get_string('strftimedatetime', 'langconfig'));
-        }
-
-        return '';
+        return slot_answer::render_starttime($values);
     }
 
     /**
@@ -296,19 +293,7 @@ class all_userbookings extends \table_sql {
      * @return string
      */
     protected function col_slotendtime($values): string {
-        $slotdata = slot_answer::get_slot_data($values);
-        if (!empty($slotdata['slots']) && is_array($slotdata['slots'])) {
-            $lastslot = end($slotdata['slots']);
-            if (is_array($lastslot) && !empty($lastslot['end'])) {
-                return userdate((int)$lastslot['end'], get_string('strftimedatetime', 'langconfig'));
-            }
-        }
-
-        if (!empty($values->enddate)) {
-            return userdate((int)$values->enddate, get_string('strftimedatetime', 'langconfig'));
-        }
-
-        return '';
+        return slot_answer::render_endtime($values);
     }
 
     /**
@@ -318,88 +303,7 @@ class all_userbookings extends \table_sql {
      * @return string
      */
     protected function col_slotteachers($values): string {
-        $slotdata = slot_answer::get_slot_data($values);
-        if (!empty($slotdata['teachers_per_slot']) && is_array($slotdata['teachers_per_slot'])) {
-            $allteacherids = [];
-            foreach ($slotdata['teachers_per_slot'] as $entry) {
-                if (!is_array($entry) || empty($entry['teachers']) || !is_array($entry['teachers'])) {
-                    continue;
-                }
-                $allteacherids = array_merge($allteacherids, $entry['teachers']);
-            }
-
-            $allteacherids = array_values(array_unique(array_filter(array_map('intval', $allteacherids), function ($id) {
-                return $id > 0;
-            })));
-
-            $teachers = !empty($allteacherids) ? user_get_users_by_id($allteacherids) : [];
-            $lines = [];
-
-            foreach ($slotdata['teachers_per_slot'] as $entry) {
-                if (!is_array($entry) || empty($entry['teachers']) || !is_array($entry['teachers'])) {
-                    continue;
-                }
-
-                $teacherids = array_values(array_unique(array_filter(array_map('intval', $entry['teachers']), function ($id) {
-                    return $id > 0;
-                })));
-                if (empty($teacherids)) {
-                    continue;
-                }
-
-                $names = [];
-                foreach ($teacherids as $teacherid) {
-                    if (!empty($teachers[$teacherid])) {
-                        $names[] = fullname($teachers[$teacherid]);
-                    } else {
-                        $names[] = (string)$teacherid;
-                    }
-                }
-
-                $start = (int)($entry['start'] ?? 0);
-                $end = (int)($entry['end'] ?? 0);
-
-                if ($start > 0 && $end > $start) {
-                    $slotlabel = userdate($start, get_string('strftimedatetime', 'langconfig'))
-                        . ' - ' . userdate($end, get_string('strftimetime', 'langconfig'));
-                    $lines[] = $slotlabel . ': ' . implode(', ', $names);
-                } else {
-                    $lines[] = implode(', ', $names);
-                }
-            }
-
-            if (!empty($lines)) {
-                return implode(' ; ', $lines);
-            }
-        }
-
-        if (empty($slotdata['teachers']) || !is_array($slotdata['teachers'])) {
-            return '';
-        }
-
-        $teacherids = array_values(array_unique(array_filter(array_map('intval', $slotdata['teachers']), function ($id) {
-            return $id > 0;
-        })));
-
-        if (empty($teacherids)) {
-            return '';
-        }
-
-        $teachers = user_get_users_by_id($teacherids);
-        if (empty($teachers)) {
-            return implode(', ', $teacherids);
-        }
-
-        $names = [];
-        foreach ($teacherids as $teacherid) {
-            if (!empty($teachers[$teacherid])) {
-                $names[] = fullname($teachers[$teacherid]);
-            } else {
-                $names[] = (string)$teacherid;
-            }
-        }
-
-        return implode(', ', $names);
+        return slot_answer::render_teachers($values);
     }
 
     /**
@@ -409,12 +313,7 @@ class all_userbookings extends \table_sql {
      * @return string
      */
     protected function col_slotprice($values): string {
-        $slotdata = slot_answer::get_slot_data($values);
-        if (!isset($slotdata['price'])) {
-            return '';
-        }
-
-        return (string)$slotdata['price'];
+        return slot_answer::render_price($values);
     }
 
     /**
@@ -537,9 +436,37 @@ class all_userbookings extends \table_sql {
      *
      */
     public function col_enrollink($values): string {
-        $erlid = enrollink::get_erlid_from_baid($values->id) ?? "";
-        $value = empty($erlid) ? "" : \mod_booking\enrollink::create_enrollink($erlid);
-        return $value;
+        // When downloading, the booking answer id is selected as "uniqueid" instead of "id".
+        $baid = $values->id ?? $values->uniqueid ?? 0;
+        $erlid = empty($baid) ? "" : (enrollink::get_erlid_from_baid((int)$baid) ?? "");
+        if (empty($erlid)) {
+            // The user did not create a bundle - check if the user created or used an enrollink for this option.
+            $erlid = enrollink::get_erlid_for_user((int)$values->userid, (int)$values->optionid);
+        }
+        if (empty($erlid)) {
+            return "";
+        }
+        if ($this->is_downloading()) {
+            $url = new moodle_url('/mod/booking/enrollink.php', ['erlid' => $erlid]);
+            return $url->out(false);
+        }
+        return \mod_booking\enrollink::create_enrollink($erlid);
+    }
+
+    /**
+     * Returns the user from whom the enrollink was received (with link to the user profile).
+     *
+     * @param object $values
+     *
+     * @return string
+     *
+     */
+    public function col_enrollinkreceivedfrom($values): string {
+        return enrollink::render_enrollink_received_from(
+            (int)$values->userid,
+            (int)$values->optionid,
+            !$this->is_downloading()
+        );
     }
 
     /**

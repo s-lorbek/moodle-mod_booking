@@ -33,10 +33,30 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['activitycompletionsuccess'] = 'Alle Nutzer/innen wurden für den Aktivitätsabschluss ausgewählt';
-$string['addtocalendardesc'] = 'Kurs-Kalenderevents können von ALLEN Kursteilnehmer/innen des Kurses gesehen werden. Falls Sie nicht möchten, dass Kurs-Kalenderevents
-erstellt werden, können Sie diese Einstellung standardmäßig ausschalten und sperren. Keine Sorge: Normale Kalenderevents für gebuchte Optionen (User-Events) werden weiterhin erstellt.';
+$string['addtocalendar_locked_desc'] = 'Wenn aktiviert, ist das Auswahlfeld "Zum Moodle-Kalender hinzufügen" im Formular der Buchungsoption auf die oben eingestellte Vorbelegung fixiert und kann von Bearbeiter/innen der Option nicht geändert werden. Nutzer-Kalendereinträge für gebuchte Optionen werden unabhängig davon weiterhin erstellt.';
+$string['addtocalendardefault_desc'] = 'Vorausgewählter Wert des Auswahlfelds "Zum Moodle-Kalender hinzufügen" beim Anlegen einer neuen Buchungsoption. "Website-Termin" greift nur für Nutzer/innen mit der Berechtigung mod/booking:createcalendarsiteevents (Administrator/innen haben sie immer) - für alle anderen wird stattdessen "Kurs-Termin" vorbelegt. Bestehende Buchungsoptionen, der CSV-Import und der Webservice sind von dieser Vorbelegung nicht betroffen.';
+$string['addtocalendarlockedhint'] = 'Das Feld "Zum Moodle-Kalender hinzufügen" ist für alle Buchungsoptionen gesperrt (Plugin-Einstellung: "Zum Moodle-Kalender hinzufügen" sperren). Als Administrator/in können Sie es {$a}.';
 $string['addtogroup'] = 'Nutzer/innen automatisch in Gruppe des verknüpften Kurses einschreiben';
-$string['addtogroup_help'] = 'Nutzer/innen automatisch in Gruppe des in der Buchungsoption verknüpften Kurses eintragen. Die Gruppe wird nach folgendem Schema automatisch erstellt: Aktivitätsname - Name der Buchungsoption';
+$string['addtogroup_help'] = 'Nutzer/innen automatisch in eine Gruppe des Kurses eintragen, der in den Einstellungen der Buchungsoption verknüpft ist. Die Gruppe wird nach folgendem Schema automatisch erstellt: Aktivitätsname - Name der Buchungsoption';
+$string['addtogroupofcurrentcourse'] = 'Nutzer/innen automatisch in Gruppe(n) des Kurses einschreiben, in dem sich diese Buchungsinstanz befindet';
+$string['addtogroupofcurrentcourse_help'] = 'Wählen Sie die Gruppe(n) des Kurses aus, in dem sich diese Buchungsinstanz befindet. Nutzer/innen werden in diese Gruppen eingeschrieben, sobald sie mindestens eine Buchungsoption dieser Instanz gebucht haben. Die Gruppen müssen zuvor in diesem Kurs erstellt werden.<br>
+Es ist auch möglich, Nutzer/innen für jede gebuchte Option in eine spezifische Gruppe einzuschreiben: Diese Gruppen werden automatisch erstellt und nach der jeweiligen Buchungsoption benannt.';
+$string['addtogroupsofconnectedcourse'] = 'Nutzer/innen in Gruppe(n) des verknüpften Kurses einschreiben';
+$string['addtogroupsofconnectedcourse_help'] = 'Wählen Sie die Gruppe(n) des verknüpften Kurses aus, in die Nutzer/innen bei der Buchung dieser Option eingeschrieben werden. Es können nur Gruppen des aktuell gespeicherten verknüpften Kurses gewählt werden - nach einem Kurswechsel bitte die Option zuerst speichern. Diese manuelle Auswahl ist nur verfügbar, solange "Nutzer/innen automatisch in Gruppe des verknüpften Kurses einschreiben" in den Einstellungen der Buchungsinstanz nicht aktiv ist.';
+$string['addtogroupsofconnectedcourseinfo'] = 'Die Gruppe im verknüpften Kurs wird für diese Buchungsoption automatisch erstellt, weil "Nutzer/innen automatisch in Gruppe des verknüpften Kurses einschreiben" in den Einstellungen der Buchungsinstanz aktiv ist. Gruppen können daher hier nicht manuell ausgewählt werden.';
+$string['agent_booking_booked_users_label'] = 'Gebuchte Nutzer/innen';
+$string['agent_booking_diagnose_cancel_other_user_permission_denied'] = 'Sie dürfen keine Stornodiagnose für andere Nutzer/innen ausführen.';
+$string['agent_booking_diagnose_cancel_reason_concrete_enrollink_used'] = 'Konkreter Zustand: Eine andere Person ist über den Einschreibelink dieser Buchungsantwort gebucht (booking_enrollink_items mit consumed = 1 zum Bundle der Antwort). Selbststorno ist absichtlich gesperrt; bei Bedarf muss eine Kassier/in oder eine Person mit Buchungsverwaltungsrechten die Buchung stornieren (über den Link gebuchte Personen bleiben gebucht, der Link wird ungültig).';
+$string['agent_booking_diagnose_other_user_permission_denied'] = 'Sie dürfen keine Buchungsdiagnose für andere Nutzer/innen ausführen.';
+$string['agent_booking_diagnose_reason_maxperuser_exceeded'] = 'Die maximale Anzahl an Buchungen pro Nutzer/in wurde erreicht ({$a} Buchungen erlaubt).';
+$string['agent_booking_diagnose_reason_maxperuser_exceeded_other'] = 'Die ausgewählte Person hat die maximale Anzahl an Buchungen pro Nutzer/in erreicht ({$a} Buchungen erlaubt).';
+$string['agent_booking_diagnose_reason_option_invisible'] = 'Diese Buchungsoption ist auf unsichtbar gestellt und für normale Nutzer/innen nicht sichtbar.';
+$string['agent_booking_diagnose_reason_option_invisible_other'] = 'Die ausgewählte Buchungsoption ist auf unsichtbar gestellt und für normale Nutzer/innen nicht sichtbar.';
+$string['agent_booking_resolve_user_ambiguous'] = 'Mehrere Nutzer/innen wurden gefunden: {$a}. Bitte geben Sie eine spezifischere Nutzerabfrage an (z. B. mit E-Mail oder Nutzer-ID).';
+$string['ai_property_bookuserscompleted'] = 'Nutzer/innen buchen: als abgeschlossen markieren';
+$string['ai_property_bookuserstimebooked'] = 'Nutzer/innen buchen: Buchungszeit';
+$string['ai_property_bookusersupdateexisting'] = 'Nutzer/innen buchen: bestehende Buchungen aktualisieren';
+$string['ai_property_selectusers'] = 'Bedingung ausgewählte Nutzer/innen';
 $string['allbookingoptions'] = 'Nutzer/innen für alle Buchungsoptionen herunterladen';
 $string['allcompetenciesmustbefound'] = 'Nutzer/in muss all diese Kompetenzen haben';
 $string['allmoodleusers'] = 'Alle Nutzer/innen dieser Website';
@@ -45,6 +65,7 @@ $string['allowoverbookingheader_desc'] = 'Berechtigten Nutzer/innen erlauben, Ku
 $string['allteachers'] = 'Alle Trainer/innen';
 $string['allteacherspagebookinginstances'] = 'Auf der "Alle Trainer/innen"-Seite nur Trainer/innen aus den folgenden Buchungsintanzen anzeigen. (Wählen Sie "Keine Auswahl", um ALLE Trainer/innen anzuzeigen.)';
 $string['allusersbooked'] = 'Alle {$a} Nutzer/innen wurden erfolgreich für diese Buchungsoption gebucht.';
+$string['alwaysbookanyonealert'] = 'Sie haben Buchung mit der Einstellung <a href="{$a}" target="_blank">booking | alwaysbookanyone</a> so konfiguriert, dass immer alle Nutzer/innen aller Kurse gebucht werden können.';
 $string['approvalsettings_desc'] = 'Booking unterstützt verschiedene Bestätigungsprozesse, wenn Nutzer/innen sich ihre Buchungen bestätigen lassen müssen. Im Standardprozess können Trainer/innen die Anfragen über die Warteliste bestätigen. Andere Prozesse können über Bookingextension Subplugins nachgeladen werden.';
 $string['assignteachers'] = 'Lehrer/innen zuweisen:';
 $string['autoenrol'] = 'Nutzer/innen automatisch in verknüpften Kurs einschreiben';
@@ -101,11 +122,15 @@ $string['booking:addeditownoption'] = 'Eigene Buchungsoptionen bearbeiten (eigen
 die man entweder selbst angelegt hat oder bei denen man als Trainer/in zugewiesen ist)';
 $string['booking:bookallstudents'] = 'Alle eingeschriebenen Teilnehmer/innen in eine Option buchen';
 $string['booking:bookanyone'] = 'Darf alle Nutzer/innen buchen';
+$string['booking:changecustomformofotherusers'] = 'Formularwerte (Customform), die andere Nutzer/innen beim Buchen eingegeben haben, bearbeiten (PRO)';
 $string['booking:communicate'] = 'Kann kommunizieren (z.B. Nachrichten an gebuchte Nutzer/innen schicken)';
+$string['booking:createcalendarsiteevents'] = 'Website-Termine für Buchungsoptionen im Kalender anlegen (für alle Nutzer/innen der Website sichtbar, keine Einschreibung nötig)';
 $string['booking:duplicateanycourse'] = 'Beliebigen Kurs als Duplizierungsvorlage auswählen (auch Kurse, auf die der/die Nutzer/in keinen Zugriff hat)';
 $string['booking:managebookedusers'] = 'Buchungen von Nutzer/innen verwalten';
 $string['booking:overrideboconditions'] = 'Nutzer/in darf buchen auch wenn Verfügbarkeit false zurückliefert.';
 $string['booking:sendpollurltoteachers'] = 'Umfragelink and Trainer/innen senden';
+$string['booking:skill_mod_booking_book_users'] = 'KI-Skill: Nutzer/innen in eine Option einbuchen';
+$string['booking:skill_mod_booking_update_option_trainer'] = 'KI-Skill: Trainer/in einer Buchungsoption aktualisieren';
 $string['booking:subscribeusers'] = 'Für andere Teilnehmer/innen Buchungen durchführen';
 $string['bookinganswercancelled'] = 'Buchungsoption von/für Nutzer/in storniert';
 $string['bookinganswerwaitingforconfirmationdesc'] = 'Nutzer/in mit id {$a->relateduserid} hat sich für die Buchungsoption mit ID {$a->objectid} vorangemeldet.';
@@ -122,7 +147,15 @@ $string['bookingoptiondenied:description'] = 'Nutzer/in mit ID {$a->userid} hat 
 $string['bookingoptionupdateddesc'] = 'Nutzer/in mit ID "{$a->userid}" hat Buchungsoption "{$a->objectid}" aktualisiert.';
 $string['bookingplacesinfotextsinfo'] = 'Wählen Sie aus, wie die Platzverfügbarkeit für Nutzer/innen angezeigt werden soll.';
 $string['bookingpollurlteachers'] = 'Link zur Trainer/innen-Umfrage';
+$string['bookingstrackermessagesender:bookingmanager'] = 'Buchungsverwalter/in der Buchungsinstanz (Standard)';
+$string['bookingstrackermessagesender:currentuser'] = 'Eingeloggte/r Nutzer/in (Person, die die Nachricht tatsächlich sendet)';
+$string['bookingstrackermessagesender_desc'] = 'Diese Person wird als Absender/in der Nachrichten verwendet, die aus dem Buchungstracker gesendet werden ("Nachricht senden", "E-Mail an Trainer/innen", "E-Mail an Kontaktperson(en)"). Empfänger/innen können so direkt der richtigen Person antworten. Ist kein/e gültige/r Buchungsverwalter/in gesetzt, wird die eingeloggte Person als Absender/in verwendet.';
+$string['bookingstrackersetrating'] = 'Nutzer/innen bewerten';
 $string['bookotherusers'] = 'Buchung für andere Nutzer/innen durchführen';
+$string['bookotherusersavailability_desc'] = 'Legt fest, wie die Seite "Buchung für andere Nutzer/innen durchführen" mit Verfügbarkeitsbedingungen einer Buchungsoption umgeht, die ausgewählte Nutzer/innen nicht erfüllen. Standardmäßig werden Verfügbarkeitsbedingungen beim Buchen für andere ignoriert.';
+$string['bookotherusersavailabilityblocked'] = 'Folgende Nutzer/innen wurden nicht gebucht, weil sie die Verfügbarkeitsbedingungen dieser Buchungsoption nicht erfüllen: {$a}';
+$string['bookotherusersavailabilitywarning'] = 'Folgende Nutzer/innen erfüllen die Verfügbarkeitsbedingungen dieser Buchungsoption nicht:';
+$string['bookotherusersavailabilitywarningconfirm'] = 'Möchten Sie die ausgewählten Nutzer/innen trotzdem buchen?';
 $string['bookotheruserslimit'] = 'Max. Anzahl an Buchungen, die ein/e der Buchungsoption zugewiesene/r Trainer/in vornehmen kann';
 $string['booktootherbooking'] = 'Nutzer/innen umbuchen / zu anderer Buchungsoption hinzufügen';
 $string['bookusers'] = 'Feld für den Import, um Nutzer/innen zu buchen';
@@ -132,11 +165,10 @@ $string['bookwithcreditsprofilefield_desc'] = 'Um die Funktion nutzen zu können
 $string['bstparticipants'] = 'Teilnehmer/innen';
 $string['bstteacher'] = 'Trainer/in(nen)';
 $string['cachedef_bookedusertable'] = 'Gebuchte Nutzer/innen-Tabelle (Cache)';
-$string['cachedef_bookforuser'] = 'Für Nutzer/innen buchen (Cache)';
 $string['cachedef_usercompetenciescache'] = 'Kompetenzen von Nutzer/innen (Cache)';
 $string['cacheturnoffforbookinganswers'] = 'Caching der Antworten (der Buchungen durch Nutzer/innen) abschalten';
 $string['caladdascourseevent'] = 'Zum Kalender hinzufügen (nur für Teilnehmer/innen des Moodle-Kurses sichtbar)';
-$string['caladdassiteevent'] = 'Zum Kalender hinzufügen (für alle Nutzer/innen sichtbar)';
+$string['caladdassiteevent'] = 'Als Website-Termin hinzufügen (für alle Nutzer/innen der Website sichtbar)';
 $string['cancancelbookallow'] = 'Teilnehmer/innen dürfen Buchungen selbst stornieren';
 $string['cancancelbookdays'] = 'Nutzer/innen können nur bis n Tage vor Kursstart stornieren. Negative Werte meinen n Tage NACH Kursstart.';
 $string['cancancelbookdays:bookingclosingtime'] = 'Nutzer/innen können nur bis n Tage vor <b>Anmeldeschluss (Buchungsende)</b> stornieren. Negative Werte meinen n Tage NACH Anmeldeschluss.';
@@ -166,6 +198,7 @@ $string['conditionselectusershoppingcart_desc'] = 'Nutzer/in mit Zahlungsverpfli
 $string['conditionselectusersuserids'] = 'Wähle die gewünschten Nutzer/innen';
 $string['confirmationonnotificationyesforall'] = 'Ja, für alle benachrichtigten Benutzer/innen';
 $string['confirmbookinganswer'] = 'Buchungsantwort bestätigen, wenn die Benachrichtigung für Benutzer/innen aktiviert ist.';
+$string['confirmcustomformoverwrite'] = 'Mir ist bewusst, dass ich durch Speichern die vom/von der Benutzer/in eingegebenen Formularwerte überschreibe.';
 $string['connectedbooking_help'] = 'Buchung von der Teilnehmer/innen übernommen werden. Es kann bestimmt werden wie viele Teilnehmer/innen übernommen werden.';
 $string['consumeatonce_help'] = 'Die Nutzer/innen haben nur einen einzigen Buchungsschritt, bei dem alle Wahlfächer gebucht werden müssen.';
 $string['containsinarray'] = 'Teilnehmer/in hat einen dieser Werte zumindest teilweise (Komma getrennt)';
@@ -249,6 +282,7 @@ Diese Funktion bezieht sich auch auf den ausgewählten Kurs im Bereich Moodle Ku
 $string['enroluserstowaitinglist'] = 'Buchende Nutzer/innen auf die Warteliste setzen und erst nach Bestätigung einschreiben?';
 $string['enteruserprofilefield'] = 'Wähle Nutzer/innen nach eingegebenem Wert für Profilfeld. Achtung! Das betrifft ALLE Nutzer/innen auf der Plattform.';
 $string['error:installmentdatefieldcondition'] = 'Das Datumsfeld "Ratenzahlung" kann nur in Kombination mit der Bedingung "Wähle Nutzer/in, die Ratenzahlung zu leisten hat" gewählt werden.';
+$string['error:invalidredirecturl'] = 'Die URL scheint ungültig zu sein. Bitte kontaktieren Sie eine/n Entwickler/in.';
 $string['error:reasonfornoteacher'] = 'Geben Sie einen Grund an, warum an diesem Termin kein/e Trainer/in anwesend war.';
 $string['error:wrongteacherid'] = 'Fehler: Für die angegebene "teacherid" wurde kein/e Nutzer/in gefunden.';
 $string['eventdesc:bookinganswercancelled'] = 'Nutzer/in "{$a->user}" hat Nutzer/in "{$a->relateduser}" aus "{$a->title}" storniert.';
@@ -344,19 +378,18 @@ $string['potentialsubscribers'] = 'Mögliche Nutzer/innen';
 $string['pricecategorychoosehighest_desc'] = 'Hat ein/e Nutzer/in mehrere Preiskategorie-Identifier in seinem Userprofil hinterlegt, wird die am höchsten gereihte Preiskategorie zuerst gewählt. Standard ist die niedrigste.';
 $string['privacy:metadata:bookingaimessages:role'] = 'Rolle der Nachricht: Nutzer/in, Assistent oder System.';
 $string['privacy:metadata:bookingaithreads'] = 'KI-Konversations-Threads, die von Nutzer/innen für Buchungsinstanzen erstellt wurden.';
+$string['privacy:metadata:bookingslotstudentteacher'] = 'Einer Person zugewiesene/r Trainer/in für eine Slot-Buchungsoption';
+$string['privacy:metadata:bookingslotstudentteacher:teacherid'] = 'Nutzer-ID der zugewiesenen Trainer/in';
+$string['privacy:metadata:bookingslotstudentteacher:userid'] = 'Person (Teilnehmer/in), der die Trainer/in zugewiesen ist';
+$string['privacy:metadata:bookingteacherunavailability'] = 'Abwesenheitszeiträume von Trainer/innen für die Slot-Buchung';
+$string['privacy:metadata:bookingteacherunavailability:teacherid'] = 'Nutzer-ID der abwesenden Trainer/in';
+$string['privacy:metadata:restscript'] = 'Die Buchungsaktion "REST-Script ausführen" sendet Buchungsdaten an einen externen REST-Endpunkt. Daten werden nur übertragen, wenn ein/e Trainer/in oder Admin eine solche Aktion explizit für eine Buchungsoption konfiguriert hat; der Ziel-Endpunkt ist Teil dieser Konfiguration.';
 $string['problemsofcohortorgroupbooking'] = '<br><p>Es konnten nicht alle Buchungen durchgeführt werden:</p>
 <ul>
 <li>{$a->notenrolledusers} Nutzer/innen sind nicht in den Kurs eingeschrieben</li>
 <li>{$a->notsubscribedusers} Nutzer/innen konnten aus anderen Gründen nicht gebucht werden</li>
 </ul>
 <p>Der Grund ist wahrscheinlich, dass die zu Buchenden nicht in diesen Kurs eingeschrieben sind und Sie nicht das Recht mod_booking:bookanyone haben</p>';
-$string['profeatures:bookingstracker'] = '<ul>
-<li><b>Benutzer/innen erlauben, die Buchungen der gesamten Seite auf verschiedenen hierarchischen Buchungsebenen
-(Termin, Buchungsoption, Buchungsinstanz, Moodle-Kurs, gesamte Plattform) zu verwalten
-und für gebuchte Benutzer/innen die Anwesenheiten zu hinterlegen.</b></li>
-<li><b>Anwesenheiten zählen - Sie können bei jedem Termin einzeln angeben, wer anwesend war.</b></li>
-<li><b>Wählen Sie selbst den Anwesenheitsstatus, der gezählt werden soll.</b></li>
-</ul>';
 $string['profeatures:enablefavoritestoggle'] = '<ul>
 <li>Nutzer/innen können Buchungsoptionen mit einem Stern-Symbol als Favoriten markieren.</li>
 <li>Pro Buchungsinstanz kann ein persönlicher Tab "Meine Favoriten" aktiviert werden.</li>
@@ -412,6 +445,7 @@ $string['sendmailtoallbookedusers'] = 'E-Mail an alle gebuchten Nutzer/innen sen
 $string['sendmailtobooker_help'] = 'Diese Option aktivieren, um Buchungsbestätigungsmails anstatt an die gebuchten Nutzer/innen zu senden an den/die Nutzer/in senden, die die Buchung durchgeführt hat. Dies betrifft nur Buchungen, die auf der Seite "Buchung für andere Nutzer/innen durchführen" getätigt wurden';
 $string['sendmailtoteachers'] = 'E-Mail an Trainer/innen senden';
 $string['sendmessagesforinvisibleoptions_desc'] = 'Aktivieren Sie diese Einstellung, um Nachrichten auch bei unsichtbaren Buchungsoptionen zu versenden (Vorsicht: Dies könnte dazu führen, dass Benutzer/innen unerwünschte E-Mails erhalten.)';
+$string['sendmessagetoteachers'] = 'E-Mail an Trainer/innen';
 $string['showallteachers'] = '&gt;&gt; Alle Trainer/innen anzeigen';
 $string['showbookingdetailstoall_desc'] = 'Auch Gäste und ausgeloggte Nutzer/innen können Buchungsdetails sehen.';
 $string['showpriceifnotloggedin'] = 'Preis(e) anzeigen, wenn Nutzer/innen nicht eingeloggt sind';
@@ -422,6 +456,7 @@ $string['slot_booked_event_description'] = 'Benutzer/in mit ID {$a->adminid} hat
 $string['slot_calendar_teachers'] = 'Gebuchte Pruefer/innen';
 $string['slot_cancelled_event_description'] = 'Benutzer/in mit ID {$a->adminid} hat die Slot-Buchungsantwort {$a->baid} (Option {$a->optionid}) für Benutzer/in {$a->userid} mit {$a->slotcount} Slot(s) storniert.';
 $string['slot_change_deadline_minutes_help'] = 'Bis wann Teilnehmer/innen einen gebuchten Slot umbuchen oder stornieren dürfen, relativ zum Start des jeweiligen Slots. Jeder Slot wird einzeln geprüft. „Standard verwenden" erbt den Wert der Buchungsinstanz bzw. der Website.';
+$string['slot_custom_duration_step_minutes_help'] = 'Granularität der wählbaren Slot-Länge zwischen minimaler und maximaler Slot-Dauer. Beispiel: Bei einem Minimum von 15 Minuten, einem Maximum von 30 Minuten und einer Schrittweite von 5 Minuten können Nutzer/innen eine Dauer von 15, 20, 25 oder 30 Minuten wählen.';
 $string['slot_error_teacher_required'] = 'Bitte waehlen Sie eine Pruefer/in aus.';
 $string['slot_examiners_per_slot'] = 'Pruefer/innen pro Slot';
 $string['slot_max_participants_per_slot'] = 'Max. Teilnehmer/innen pro Slot';
@@ -450,6 +485,7 @@ $string['studentwaitinglist'] = 'Nutzer/innen auf der Warteliste';
 $string['subbookingadditemformlink_help'] = 'Wählen Sie das Formularelement, das Sie mit dieser Zusatzbuchung verbinden wollen. Die Zusatzbuchung wird nur angezeigt, wenn die Nutzer/in davor den entsprechenden Wert im Formular gewählt hat.';
 $string['subscribersto'] = 'Trainer/innen für \'{$a}\'';
 $string['subscribetocourse'] = 'Nutzer/innen in den Kurs einschreiben';
+$string['subscribetocoursebody'] = 'Wollen Sie die ausgewählten Nutzer/innen wirklich in den mit dieser Buchungsoption verbundenen Kurs einschreiben?';
 $string['switchtemplates'] = 'Nutzer/innen können die Ansicht wechseln';
 $string['switchtemplates_help'] = 'Aktivieren Sie diese Einstellung, um es Nutzer/innen zu ermöglichen zwischen verschiedenen Ansichten zu wechseln.
 Definieren Sie im nächsten Schritt die Ansichten zwischen denen gewechselt werden kann.';

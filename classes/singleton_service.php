@@ -24,6 +24,7 @@ use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_option;
 use mod_booking\booking_option_settings;
 use mod_booking\booking_settings;
+use mod_booking\placeholders\placeholders_info;
 use stdClass;
 
 /**
@@ -83,6 +84,9 @@ class singleton_service {
     /** @var array $campaigns */
     public array $campaigns = [];
 
+    /** @var bool $campaignsloaded Whether campaigns were already fetched (an empty result is a valid, cacheable result). */
+    public bool $campaignsloaded = false;
+
     /** @var array $courses */
     public array $courses = [];
 
@@ -114,6 +118,9 @@ class singleton_service {
 
     /** @var array $tempdataforcertificate */
     public array $tempdataforcertificate;
+
+    /** @var array $showcertificatecolumns Memoized result of columns_helper::show_certificate_columns, keyed by optionid. */
+    public array $showcertificatecolumns = [];
 
     /** @var array $bookingimagefilerecords */
     public array $bookingimagefilerecords;
@@ -258,6 +265,9 @@ class singleton_service {
      */
     public static function destroy_booking_option_singleton($optionid) {
         $instance = self::get_instance();
+
+        // Placeholders rendered for this option (e.g. {dates}) must be rendered anew as well.
+        placeholders_info::purge_for_option((int) $optionid);
 
         if (
             isset($instance->bookingoptionsettings[$optionid])
@@ -411,12 +421,17 @@ class singleton_service {
             return $instance->bookingsettingsbybookingid[$bookingid];
         } else {
             try {
-                $cm = get_coursemodule_from_instance('booking', $bookingid);
+                $cm = get_coursemodule_from_instance('booking', $bookingid, 0, false, IGNORE_MISSING);
+
+                if (empty($cm)) {
+                    // Orphaned rows, for example from a deleted instance, have no course module left.
+                    return null;
+                }
 
                 $settings = new booking_settings($cm->id);
                 $instance->bookingsettingsbybookingid[$bookingid] = $settings;
                 return $settings;
-            } catch (Exception $e) {
+            } catch (\Throwable $e) {
                 return null;
             }
         }
@@ -642,7 +657,7 @@ class singleton_service {
 
         $instance = self::get_instance();
 
-        if (empty($instance->campaigns)) {
+        if (!$instance->campaignsloaded) {
             $campaigns = $DB->get_records('booking_campaigns');
 
             if (!$campaigns || empty($campaigns)) {
@@ -650,6 +665,7 @@ class singleton_service {
             } else {
                 $instance->campaigns = $campaigns;
             }
+            $instance->campaignsloaded = true;
         }
 
         return (array)$instance->campaigns;
@@ -661,7 +677,8 @@ class singleton_service {
      */
     public static function destroy_all_campaigns(): array {
         $instance = self::get_instance();
-        unset($instance->campaigns);
+        $instance->campaigns = [];
+        $instance->campaignsloaded = false;
 
         return [];
     }
@@ -677,6 +694,7 @@ class singleton_service {
 
         if (empty($id)) {
             $instance->campaigns = [];
+            $instance->campaignsloaded = false;
         } else {
             unset($instance->campaigns[$id]);
         }

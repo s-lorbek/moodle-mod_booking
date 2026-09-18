@@ -86,7 +86,12 @@ class supervisorteamreduced extends supervisorteam {
         }
 
         $table->set_sql($fields, $from, $where, $params);
-        $table->sortablecolumns = $columns;
+
+        // Sorting settings.
+        $this->define_sortablecolumns_from_columns($table, $columns, $headers);
+        $table->sort_default_column = 'name';
+        $table->sort_default_order = SORT_ASC;
+
         $table->fulltextsearchcolumns = ['name', 'text'];
 
         return $table;
@@ -118,11 +123,12 @@ class supervisorteamreduced extends supervisorteam {
      * This functions defines the columns for each scope.
      *
      * @param int $statusparam
+     * @param int $scopeid
      *
      * @return array
      *
      */
-    public function return_cols_for_tables(int $statusparam): array {
+    public function return_cols_for_tables(int $statusparam, int $scopeid = 0): array {
         $columns = [
             'name' => get_string('fullname', 'core'),
             'text' => get_string('bookingoptionname', 'mod_booking'),

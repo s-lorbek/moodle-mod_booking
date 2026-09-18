@@ -34,8 +34,11 @@ use local_wunderbyte_table\filters\types\datepicker;
 use local_wunderbyte_table\filters\types\standardfilter;
 use mod_booking\booking;
 use mod_booking\booking_option;
+use mod_booking\booking_settings;
+use mod_booking\customfield\booking_handler;
 use mod_booking\elective;
 use mod_booking\filters\available_places;
+use mod_booking\filters\bookable_startingsoon;
 use mod_booking\option\fields\competencies;
 use mod_booking\shortcodes;
 use mod_booking\shortcodes_handler;
@@ -352,8 +355,10 @@ class view implements renderable, templatable {
         if (in_array('optionsiamresponsiblefor', $showviews)) {
             // If we show this table first, we don't load it lazy.
             $lazy = $whichview !== 'optionsiamresponsiblefor';
+            // Note: the method takes no userid (it resolves $USER itself); the first
+            // three parameters are the tfilter/tsearch/tsort booleans (issue #2212).
             $this->renderedresponsiblecontacttable =
-                $this->get_rendered_table_for_responsible_contact($USER->id, true, true, $lazy);
+                $this->get_rendered_table_for_responsible_contact(true, true, true, $lazy);
         }
 
         // Only the booking options of my institution.
@@ -392,8 +397,10 @@ class view implements renderable, templatable {
         if (in_array('showfieldofstudy', $showviews)) {
             // If we show this table first, we don't load it lazy.
             $lazy = $whichview !== 'showfieldofstudy';
+            // This tab renders via the shortcode, so the favorites star is passed on as shortcode argument.
+            $favoritesarg = self::favoritestoggle_is_enabled() ? ' favorites=1' : '';
             $this->renderedfieldofstudyoptionstable
-                = format_text('[fieldofstudyoptions sortby="coursestarttime" sortorder="asc"]');
+                = format_text('[fieldofstudyoptions sortby="coursestarttime" sortorder="asc"' . $favoritesarg . ']');
         }
 
         // PRO feature: "What's new?" tab.
@@ -463,10 +470,6 @@ class view implements renderable, templatable {
 
         // Create the table.
         $allbookingoptionstable = new bookingoptions_wbtable("cmid_{$cmid} allbookingoptionstable");
-        // Show favorites toggle only when enabled as a PRO feature.
-        if (wb_payment::pro_version_is_activated() && get_config('booking', 'enablefavoritestoggle')) {
-            $allbookingoptionstable->showfavoritestoggle = true;
-        }
 
         // Initialize the default columnes, headers, settings and layout for the table.
         // In the future, we can parametrize this function so we can use it on many different places.
@@ -620,10 +623,8 @@ class view implements renderable, templatable {
         $myfavoritestable = new bookingoptions_wbtable("cmid_{$cmid}_userid_{$USER->id} myfavoritestable");
 
         // Initialize the default columns, headers, settings and layout for the table.
+        // The favorites toggle is set in there (the tab is only reachable when the feature is enabled).
         $this->wbtable_initialize_layout($myfavoritestable, true, true, true);
-
-        // The favorites tab always shows the toggle (it is only reachable when the feature is enabled).
-        $myfavoritestable->showfavoritestoggle = true;
 
         $wherearray = ['bookingid' => (int)$booking->id];
 
@@ -779,18 +780,24 @@ class view implements renderable, templatable {
         $responsiblecontacttable->requirelogin = true;
 
         if ($lazy) {
-            // This line is only necessary, so we get rawdata.
-            $responsiblecontacttable->printtable($booking->get_pagination_setting(), true);
+            global $DB;
+            // Hide the tab without building the whole table: the previous full
+            // printtable() run (including the filter value counts over the whole
+            // instance) was only needed for the rawdata empty check below - a
+            // cheap existence check answers that question too (issue #2212).
+            if (!$DB->record_exists_sql("SELECT 'x' FROM {$from} WHERE {$where}", $params)) {
+                return null;
+            }
 
             [$idstring, $encodedtable, $out]
                 = $responsiblecontacttable->lazyouthtml($booking->get_pagination_setting(), true);
         } else {
             $out = $responsiblecontacttable->outhtml($booking->get_pagination_setting(), true);
-        }
 
-        // Return null if no rows are there, so no tab will be rendered.
-        if (empty($responsiblecontacttable->rawdata)) {
-            return null;
+            // Return null if no rows are there, so no tab will be rendered.
+            if (empty($responsiblecontacttable->rawdata)) {
+                return null;
+            }
         }
 
         return $out;
@@ -799,19 +806,32 @@ class view implements renderable, templatable {
     /**
      * Render table for one specific booked option.
      * @param int $optionid
+     * @param int|null $forceviewparam optional MOD_BOOKING_VIEW_PARAM_* to force (e.g. cards) instead of the instance default
+     * @param bool $tablechrome whether to render the surrounding table chrome (search, pagination, etc.)
      * @return string the rendered table
      */
-    public function get_rendered_showonlyone_table(int $optionid) {
+    public function get_rendered_showonlyone_table(int $optionid, ?int $forceviewparam = null, bool $tablechrome = true) {
         $cmid = $this->cmid;
 
         $booking = singleton_service::get_instance_of_booking_by_cmid($cmid);
 
-        // Create the table.
-        $showonlyonetable = new bookingoptions_wbtable("cmid_{$cmid}_optionid_{$optionid} showonlyonetable");
+        // Create the table. A forced view gets its own unique id so it never returns a cached render
+        // of the default (e.g. list) view that was produced for the same option under the shared id.
+        $tablesuffix = $forceviewparam !== null ? "_view{$forceviewparam}" : '';
+        $showonlyonetable = new bookingoptions_wbtable("cmid_{$cmid}_optionid_{$optionid}{$tablesuffix} showonlyonetable");
 
         // Initialize the default columnes, headers, settings and layout for the table.
         // In the future, we can parametrize this function so we can use it on many different places.
-        $this->wbtable_initialize_layout($showonlyonetable, false, false, false);
+        $this->wbtable_initialize_layout($showonlyonetable, false, false, false, $forceviewparam);
+
+        if (!$tablechrome) {
+            // Compact single-option embed (e.g. the AI agent renders one preview card per option):
+            // a count label, reload and download button on every one-row card are pure noise.
+            $showonlyonetable->showcountlabel = false;
+            $showonlyonetable->showreloadbutton = false;
+            $showonlyonetable->showdownloadbutton = false;
+            $showonlyonetable->showdownloadbuttonatbottom = false;
+        }
 
         $wherearray = [
             'bookingid' => (int) $booking->id,
@@ -1070,17 +1090,28 @@ class view implements renderable, templatable {
     }
 
     /**
+     * Check whether the favorites star toggle is enabled (PRO feature, requires the enablefavoritestoggle setting).
+     *
+     * @return bool
+     */
+    public static function favoritestoggle_is_enabled(): bool {
+        return wb_payment::pro_version_is_activated() && get_config('booking', 'enablefavoritestoggle');
+    }
+
+    /**
      * Helper function to initialize the layout for the table.
      * @param bookingoptions_wbtable $bowbtable reference to the table class that should be initialized
      * @param bool $filter
      * @param bool $search
      * @param bool $sort
+     * @param int|null $forceviewparam optional MOD_BOOKING_VIEW_PARAM_* to force, overriding the instance default
      */
     public function wbtable_initialize_layout(
         bookingoptions_wbtable &$bowbtable,
         bool $filter = true,
         bool $search = true,
-        bool $sort = true
+        bool $sort = true,
+        ?int $forceviewparam = null
     ) {
 
         $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($this->cmid);
@@ -1088,6 +1119,12 @@ class view implements renderable, templatable {
 
         if (!in_array('booknow', $optionsfields)) {
             $optionsfields[] = 'booknow'; // We always need the booknow field for the buttons.
+        }
+
+        // The favorites star must be available on every table (tab) of view.php, not just on "All booking options".
+        // It only renders for logged-in non-guest users (see col_action), so setting it here is safe for guests.
+        if (self::favoritestoggle_is_enabled()) {
+            $bowbtable->showfavoritestoggle = true;
         }
 
         $sortorder = $bookingsettings->defaultsortorder === "desc" ? SORT_DESC : SORT_ASC;
@@ -1133,8 +1170,15 @@ class view implements renderable, templatable {
         if (empty($viewparam)) {
             $viewparam = MOD_BOOKING_VIEW_PARAM_LIST; // List view is the default view.
         }
+        if ($forceviewparam !== null) {
+            // Callers (e.g. the AI booking-option preview) can force a specific view regardless of the
+            // instance default — the agent always shows option previews as cards.
+            $viewparam = $forceviewparam;
+        }
 
-        if ($bookingsettings->switchtemplates) {
+        // A forced view must not be reverted by the template switcher / a stored user preference,
+        // so skip the switcher wiring entirely in that case.
+        if ($bookingsettings->switchtemplates && $forceviewparam === null) {
             $selectedtemplates = $bookingsettings->switchtemplatesselection ?? [];
             // If template switcher is turned on, we add it.
             // Only add templates that have been selected in instance.
@@ -1180,8 +1224,14 @@ class view implements renderable, templatable {
             }
         }
 
-        // Todo: Implement possibility to include custom fields in the table.
-        // This is already implemented in shortcodes.
+        // Add customfields configured in the instance settings (or the global
+        // plugin setting as fallback) to the table.
+        // Shortcode args have precedence, as apply_standard_params_for_bookingtable overrides
+        // the info array whenever the includecustomfields arg is present.
+        if (!empty($customfieldsinfoarray = self::get_customfieldsforview_info_array($bookingsettings))) {
+            $bowbtable->set_customfields_info_array($customfieldsinfoarray);
+        }
+
         self::apply_standard_params_for_bookingtable(
             $bowbtable,
             $optionsfields,
@@ -1192,8 +1242,67 @@ class view implements renderable, templatable {
             true,
             $viewparam,
             $this->cmid
-            // Todo: $args with includecustomfields.
         );
+    }
+
+    /**
+     * Build the customfields info array from the instance setting customfieldsforview.
+     *
+     * If the instance does not define any fields, the global plugin setting
+     * customfieldsforview is used as fallback. If the instance defines fields,
+     * only those are shown and the global setting is ignored.
+     *
+     * Uses the same structure as shortcodes_handler::get_includecustomfields_info_array.
+     * The region is left empty, so prepare_customfields can resolve it depending on the
+     * rendered template (list or cards). The icon is taken from the global plugin setting
+     * customfieldicon_<shortname> (same icons as on the option detail page). If no icon
+     * is configured, the default icon fa-puzzle-piece is used.
+     *
+     * @param booking_settings $bookingsettings settings of the booking instance
+     * @return array an info array keyed by customfield shortname
+     */
+    public static function get_customfieldsforview_info_array(booking_settings $bookingsettings): array {
+        $selectedfields = (array)($bookingsettings->customfieldsforview ?? []);
+        if (empty($selectedfields)) {
+            // Fall back to the fields defined in the global plugin setting.
+            $selectedfields = array_filter(array_map(
+                'trim',
+                explode(',', (string)get_config('booking', 'customfieldsforview'))
+            ));
+        }
+        if (empty($selectedfields)) {
+            return [];
+        }
+
+        // We ignore customfields that do not exist (anymore).
+        $validcustomfields = array_map(fn($cf) => $cf->shortname, booking_handler::get_customfields());
+        if (empty($validcustomfields)) {
+            return [];
+        }
+
+        // Older instances stored shortname => fullname pairs instead of a plain list of shortnames.
+        $selectedfields = array_is_list($selectedfields) ? $selectedfields : array_keys($selectedfields);
+
+        $cfinfoarray = [];
+        foreach ($selectedfields as $shortname) {
+            if (!in_array($shortname, $validcustomfields)) {
+                continue;
+            }
+            // If no icon is configured for the customfield, we fall back to the default icon.
+            $iconclass = 'fa fa-fw fa-puzzle-piece';
+            $icon = trim((string)get_config('booking', 'customfieldicon_' . $shortname));
+            // Only accept a valid CSS-class string (letters, digits, dashes, underscores, spaces).
+            if (!empty($icon) && preg_match('/^[a-z0-9 _-]+$/i', $icon)) {
+                $iconclass = 'fa fa-fw ' . $icon;
+            }
+            $cfinfoarray[$shortname] = [
+                'colname' => $shortname,
+                'region' => null,
+                'iconclass' => $iconclass,
+                'class' => null,
+            ];
+        }
+        return $cfinfoarray;
     }
 
 
@@ -1258,6 +1367,10 @@ class view implements renderable, templatable {
             }
         }
 
+        // Store the view which is actually rendered, so that col_booknow knows if the pre booking
+        // pages can be shown inline (only supported by the list views) - see turnoffmodals setting.
+        $bowbtable->viewparam = $viewparam;
+
         // Switch view type (cards view or list view).
         switch ($viewparam) {
             case MOD_BOOKING_VIEW_PARAM_CARDS:
@@ -1292,6 +1405,20 @@ class view implements renderable, templatable {
 
         $bowbtable->define_cache('mod_booking', 'bookingoptionstable');
 
+        // Additional fulltext search columns can come from the shortcode argument or from the instance setting.
+        $additionalsearchcolumns = [];
+        if (!empty($args['fulltextsearchcolumns'])) {
+            // The fulltextsearchcolumns argument implicitly enables search.
+            $search = true;
+            $additionalsearchcolumns = explode(',', $args['fulltextsearchcolumns']);
+        }
+        if (!empty($cmid)) {
+            $additionalsearchcolumns = array_merge(
+                $additionalsearchcolumns,
+                (array)($bookingsettings->fulltextsearchcolumns ?? [])
+            );
+        }
+
         if ($search) {
             $fulltextsearchcolumns = [];
             $fulltextsearchcolumns[] = 'titleprefix';
@@ -1308,6 +1435,29 @@ class view implements renderable, templatable {
             if (in_array('teacher', $optionsfields)) {
                 $fulltextsearchcolumns[] = 'teacherobjects';
             }
+            if (!empty($additionalsearchcolumns)) {
+                // Additional search columns can be either columns of booking_options or customfield shortnames.
+                $validcolumns = array_keys($DB->get_columns('booking_options', true));
+                $customfieldshortnames = array_map(
+                    fn($field) => $field->shortname,
+                    booking_handler::get_customfields()
+                );
+                foreach ($additionalsearchcolumns as $column) {
+                    $column = clean_param(trim($column), PARAM_ALPHANUMEXT);
+                    if (
+                        in_array($column, $validcolumns, true)
+                        || in_array($column, $customfieldshortnames, true)
+                    ) {
+                        $fulltextsearchcolumns[] = $column;
+                    } else if (!empty($column)) {
+                        debugging(
+                            "Invalid column '$column' in fulltextsearchcolumns shortcode argument was ignored.",
+                            DEBUG_DEVELOPER
+                        );
+                    }
+                }
+                $fulltextsearchcolumns = array_values(array_unique($fulltextsearchcolumns));
+            }
             $bowbtable->define_fulltextsearchcolumns($fulltextsearchcolumns);
         }
 
@@ -1315,14 +1465,24 @@ class view implements renderable, templatable {
             // Booking availability filter.
             $bowbtable->add_filter(available_places::get());
 
+            // Toggle filter showing only bookable options starting within the next days.
+            // It is added via the shortcode argument 'filterbookablenextdays', e.g. filterbookablenextdays="28".
+            $bookablenextdays = (int)($args['filterbookablenextdays'] ?? 0);
+            if ($bookablenextdays > 0) {
+                $bowbtable->add_filter(bookable_startingsoon::get($bookablenextdays));
+            }
+
             if (in_array('teacher', $optionsfields)) {
                 $standardfilter = new standardfilter('teacherobjects', get_string('teachers', 'mod_booking'));
                 $standardfilter->add_options(['jsonattribute' => 'name']);
                 $bowbtable->add_filter($standardfilter);
             }
             if (in_array('location', $optionsfields)) {
-                $standardfilter = new standardfilter('location', get_string('location', 'mod_booking'));
-                $bowbtable->add_filter($standardfilter);
+                // Multilevel entity tree filter when opted in and local_entities is present; otherwise
+                // the unchanged plain-text location filter (BC-2/BC-3).
+                $bowbtable->add_filter(
+                    \mod_booking\local\entities_tree_provider::get_location_filter(get_string('location', 'mod_booking'))
+                );
             }
             if (in_array('institution', $optionsfields)) {
                 $standardfilter = new standardfilter('institution', get_string('institution', 'mod_booking'));
@@ -1389,6 +1549,11 @@ class view implements renderable, templatable {
                             $shortnamesid[$record->shortname] = (int)$record->id;
                         }
                         foreach ($jsonsettings->customfieldsforfilter as $shortname => $localizedname) {
+                            if (!isset($shortnamesid[$shortname])) {
+                                // The instance config can reference fields missing on this site,
+                                // e.g. after restoring a backup from another site.
+                                continue;
+                            }
                             $localizedname = format_string($localizedname);
                             $customfieldfilter = new customfieldfilter($shortname, $localizedname);
                             $customfieldfilter->set_sql_for_fieldid($shortnamesid[$shortname]);
@@ -1508,6 +1673,12 @@ class view implements renderable, templatable {
         }
         if (in_array('bookingclosingtime', $optionsfields)) {
             $cardlist[] = 'bookingclosingtime';
+        }
+        // Customfields without an explicit region are shown in the card list, right above the dates.
+        foreach ($bowbtable->get_customfields_info_array() as $cfshortname => $cfinfoarray) {
+            if (empty($cfinfoarray['region'])) {
+                $cardlist[] = $cfshortname;
+            }
         }
         if (in_array('showdates', $optionsfields)) {
             $cardlist[] = 'showdates';
@@ -1670,7 +1841,8 @@ class view implements renderable, templatable {
         );
 
         // Prepare possible custom fields.
-        self::prepare_customfields($bowbtable);
+        // In the card list, each customfield is rendered on its own line, styled like institution.
+        self::prepare_customfields($bowbtable, 'cardlist', 'text-start text-gray pe-2', 'text-gray');
 
         // At last, we set the correct template!
         $bowbtable->tabletemplate = 'mod_booking/table_cards';
@@ -1680,34 +1852,63 @@ class view implements renderable, templatable {
     }
 
     /**
-     * Helper function to generate cards table.
+     * Helper function to add configured customfield columns to the table.
+     *
+     * Customfields with an explicit region (e.g. from the includecustomfields shortcode argument)
+     * are added to that region as given - regions may also come from templates of other plugins.
+     * Customfields without a region (instance setting customfieldsforview) go to the default
+     * region of the rendered template, where they get the standard look and position.
+     *
      * @param bookingoptions_wbtable $bowbtable reference to table instance
+     * @param string $defaultregion default region of the rendered template
+     * @param string $defaultcolumnclass columnclass applied in the default region (same look as institution)
+     * @param string $defaulticonclass extra classes appended to the icon in the default region (e.g. text-gray)
      * @return void
      */
-    public static function prepare_customfields(bookingoptions_wbtable &$bowbtable) {
+    public static function prepare_customfields(
+        bookingoptions_wbtable &$bowbtable,
+        string $defaultregion = 'cardbody',
+        string $defaultcolumnclass = '',
+        string $defaulticonclass = ''
+    ) {
         $customfieldsinfoarray = $bowbtable->get_customfields_info_array();
         if (empty($customfieldsinfoarray)) {
             return;
         }
         foreach ($customfieldsinfoarray as $cfshortname => $cfinfoarray) {
-            if (!empty($cfinfoarray['region'])) {
-                $bowbtable->add_subcolumns($cfinfoarray['region'], [$cfshortname]);
-                if (!empty($cfinfoarray['class'])) {
-                    $bowbtable->add_classes_to_subcolumns(
-                        $cfinfoarray['region'],
-                        ['columnvalueclass' => $cfinfoarray['class']],
-                        [$cfshortname]
-                    );
-                }
-                if (!empty($cfinfoarray['iconclass'])) {
-                    $bowbtable->add_classes_to_subcolumns(
-                        $cfinfoarray['region'],
-                        ['columniclassbefore' => $cfinfoarray['iconclass']],
-                        [$cfshortname]
-                    );
-                }
-                $bowbtable->add_classes_to_subcolumns($cfinfoarray['region'], ['columnkeyclass' => 'd-none']);
+            // Only fields without an explicit region get the standard look (styled like institution).
+            $isdefaultregion = empty($cfinfoarray['region']);
+            $region = $isdefaultregion ? $defaultregion : $cfinfoarray['region'];
+            // The generators already position the customfields of the default region.
+            if (!isset($bowbtable->subcolumns[$region][$cfshortname])) {
+                $bowbtable->add_subcolumns($region, [$cfshortname]);
             }
+            if ($isdefaultregion && $defaultcolumnclass !== '') {
+                $bowbtable->add_classes_to_subcolumns(
+                    $region,
+                    ['columnclass' => $defaultcolumnclass],
+                    [$cfshortname]
+                );
+            }
+            if (!empty($cfinfoarray['class'])) {
+                $bowbtable->add_classes_to_subcolumns(
+                    $region,
+                    ['columnvalueclass' => $cfinfoarray['class']],
+                    [$cfshortname]
+                );
+            }
+            if (!empty($cfinfoarray['iconclass'])) {
+                $iconclass = $cfinfoarray['iconclass'];
+                if ($isdefaultregion && $defaulticonclass !== '') {
+                    $iconclass .= ' ' . $defaulticonclass;
+                }
+                $bowbtable->add_classes_to_subcolumns(
+                    $region,
+                    ['columniclassbefore' => $iconclass],
+                    [$cfshortname]
+                );
+            }
+            $bowbtable->add_classes_to_subcolumns($region, ['columnkeyclass' => 'd-none'], [$cfshortname]);
         }
     }
 
@@ -1750,6 +1951,12 @@ class view implements renderable, templatable {
         }
         if (in_array('institution', $optionsfields)) {
             $columnsfooter[] = 'institution';
+        }
+        // Customfields without an explicit region are shown right next to institution, before the dates.
+        foreach ($bowbtable->get_customfields_info_array() as $cfshortname => $cfinfoarray) {
+            if (empty($cfinfoarray['region'])) {
+                $columnsfooter[] = $cfshortname;
+            }
         }
         if (in_array('responsiblecontact', $optionsfields)) {
             $columnsfooter[] = 'responsiblecontact';
@@ -1912,8 +2119,13 @@ class view implements renderable, templatable {
             ['teacher']
         );
 
-        // Now we prepare possible custom fields.
-        self::prepare_customfields($bowbtable);
+        // Now we prepare possible custom fields, styled like institution.
+        self::prepare_customfields(
+            $bowbtable,
+            'footer',
+            'text-start text-gray pe-2 font-size-sm',
+            'text-gray font-size-sm'
+        );
 
         // At last, we set the correct template!
         $bowbtable->tabletemplate = 'mod_booking/table_list';

@@ -25,7 +25,7 @@
 
 namespace mod_booking;
 
-use mod_booking\booking_advanced_testcase;
+use mod_booking\tests\booking_advanced_testcase;
 use mod_booking\external\get_slots;
 use mod_booking\external\get_booked_slots;
 use mod_booking\external\save_slot_selection;
@@ -134,6 +134,90 @@ final class slotbooking_external_test extends booking_advanced_testcase {
     }
 
     /**
+     * save_slot_selection is called live (on load and on every selection change) to show inline
+     * feedback - re-checking a slot the user already booked must not report it as unavailable,
+     * or the checkout page permanently shows a false "no longer available" error.
+     */
+    public function test_save_slot_selection_allows_reselecting_own_already_booked_slot(): void {
+        [$option, $userid] = $this->create_fixed_slot_option();
+        $settings = singleton_service::get_instance_of_booking_option_settings($option->id);
+
+        $slots = slot_dto::build_picker_slots($option->id, $userid);
+        $this->assertNotEmpty($slots);
+        $slot = $slots[0];
+
+        $this->create_booked_slot_answer_multi($option->id, (int)$settings->bookingid, $userid, [
+            ['start' => (int)$slot['start'], 'end' => (int)$slot['end']],
+        ]);
+        \cache::make('mod_booking', 'bookingoptionsanswers')->delete($option->id);
+        singleton_service::destroy_instance();
+
+        $key = (int)$slot['start'] . ':' . (int)$slot['end'];
+        $result = save_slot_selection::execute($option->id, $userid, json_encode([$key]), '{}');
+        $result = \core_external\external_api::clean_returnvalue(save_slot_selection::execute_returns(), $result);
+
+        $this->assertTrue($result['valid']);
+        $this->assertSame([], json_decode($result['errors'], true));
+    }
+
+    /**
+     * A user can hold more than one active answer for the same option ("book again" /
+     * multiplebookings, e.g. several separately purchased "phases"). Re-checking a selection
+     * spanning slots from several of the user's own answers must not flag any of them.
+     */
+    public function test_save_slot_selection_allows_own_slots_across_multiple_answers(): void {
+        [$option, $userid] = $this->create_fixed_slot_option(10);
+        $settings = singleton_service::get_instance_of_booking_option_settings($option->id);
+
+        $slots = slot_dto::build_picker_slots($option->id, $userid);
+        $this->assertGreaterThanOrEqual(2, count($slots));
+        $first = $slots[0];
+        $second = $slots[1];
+
+        $this->create_booked_slot_answer_multi($option->id, (int)$settings->bookingid, $userid, [
+            ['start' => (int)$first['start'], 'end' => (int)$first['end']],
+        ]);
+        $this->create_booked_slot_answer_multi($option->id, (int)$settings->bookingid, $userid, [
+            ['start' => (int)$second['start'], 'end' => (int)$second['end']],
+        ]);
+        \cache::make('mod_booking', 'bookingoptionsanswers')->delete($option->id);
+        singleton_service::destroy_instance();
+
+        $keys = [
+            (int)$first['start'] . ':' . (int)$first['end'],
+            (int)$second['start'] . ':' . (int)$second['end'],
+        ];
+        $result = save_slot_selection::execute($option->id, $userid, json_encode($keys), '{}');
+        $result = \core_external\external_api::clean_returnvalue(save_slot_selection::execute_returns(), $result);
+
+        $this->assertTrue($result['valid']);
+        $this->assertSame([], json_decode($result['errors'], true));
+    }
+
+    /**
+     * Two slots that overlap each other in time must be rejected even though neither is
+     * persisted yet (defense-in-depth mirror of the same check in slotbooking_form::validation()).
+     */
+    public function test_save_slot_selection_rejects_overlapping_selection(): void {
+        [$option, $userid] = $this->create_fixed_slot_option(10);
+
+        $slots = slot_dto::build_picker_slots($option->id, $userid);
+        $this->assertNotEmpty($slots);
+        $start = (int)$slots[0]['start'];
+        $overlapping = $start + (15 * MINSECS);
+        $keys = [
+            $start . ':' . ($start + (30 * MINSECS)),
+            $overlapping . ':' . ($overlapping + (30 * MINSECS)),
+        ];
+
+        $result = save_slot_selection::execute($option->id, $userid, json_encode($keys), '{}');
+        $result = \core_external\external_api::clean_returnvalue(save_slot_selection::execute_returns(), $result);
+
+        $this->assertFalse($result['valid']);
+        $this->assertArrayHasKey('slot_selection', json_decode($result['errors'], true));
+    }
+
+    /**
      * The release_slots webservice cancels a selected booked slot and keeps the remaining one.
      *
      * @covers \mod_booking\external\release_slots::execute
@@ -170,6 +254,106 @@ final class slotbooking_external_test extends booking_advanced_testcase {
             slot_answer::get_slot_data($answer)['slots']
         );
         $this->assertSame([(int)$keep['start'] . ':' . (int)$keep['end']], $keys);
+    }
+
+    /**
+     * The slot picker webservices accept a user who is not enrolled in the course of
+     * the booking instance but holds mod/booking:choose there (booking options are
+     * regularly presented outside of their course, e.g. via shortcode lists — same
+     * rule as for the booking chain): loading the slots and validating/caching a
+     * selection works for the unenrolled user.
+     */
+    public function test_slot_picker_allows_unenrolled_user_with_choose(): void {
+        [$option, $userid] = $this->create_fixed_slot_option();
+
+        // Typical shortcode setup: users hold mod/booking:choose via a system level role.
+        $systemcontext = \context_system::instance();
+        $roleid = create_role('Booking user', 'bookinguser', '');
+        assign_capability('mod/booking:choose', CAP_ALLOW, $roleid, $systemcontext->id);
+        role_assign($roleid, $userid, $systemcontext->id);
+
+        $this->setUser($userid);
+        singleton_service::destroy_instance();
+
+        $slots = json_decode(get_slots::execute($option->id, $userid)['slots'], true);
+        $this->assertNotEmpty($slots);
+
+        $result = save_slot_selection::execute($option->id, $userid, json_encode([$slots[0]['key']]), '{}');
+        $result = \core_external\external_api::clean_returnvalue(save_slot_selection::execute_returns(), $result);
+        $this->assertTrue($result['valid']);
+        $this->assertSame([], json_decode($result['errors'], true));
+    }
+
+    /**
+     * Without mod/booking:choose, a user who is not enrolled in the course of the
+     * booking instance keeps being rejected by the slot picker webservices.
+     */
+    public function test_slot_picker_requires_course_access_without_choose(): void {
+        [$option, $userid] = $this->create_fixed_slot_option();
+
+        $this->setUser($userid);
+        singleton_service::destroy_instance();
+
+        $this->expectException(\moodle_exception::class);
+        get_slots::execute($option->id, $userid);
+    }
+
+    /**
+     * Acting on another user through the slot picker webservices needs the book for
+     * others (or cashier) rights: a regular user passing a foreign userid must neither
+     * read that user's picker state nor validate/cache a selection for them.
+     */
+    public function test_slot_picker_rejects_foreign_userid_without_bookforothers(): void {
+        [$option, $userid] = $this->create_fixed_slot_option();
+
+        // A second regular user who may use the picker (mod/booking:choose via a
+        // system level role), but holds no book for others rights.
+        $other = self::getDataGenerator()->create_user();
+        $systemcontext = \context_system::instance();
+        $roleid = create_role('Booking user', 'bookinguser', '');
+        assign_capability('mod/booking:choose', CAP_ALLOW, $roleid, $systemcontext->id);
+        role_assign($roleid, $other->id, $systemcontext->id);
+
+        $this->setUser($other);
+        singleton_service::destroy_instance();
+
+        // Reading the foreign picker state is rejected...
+        try {
+            get_slots::execute($option->id, $userid);
+            $this->fail('Reading another user\'s picker state must require book for others rights.');
+        } catch (\required_capability_exception $e) {
+            $this->assertSame('nopermissions', $e->errorcode);
+        }
+
+        // ...as is validating/caching a selection for the foreign user.
+        $this->expectException(\required_capability_exception::class);
+        save_slot_selection::execute($option->id, $userid, json_encode(['1:2']), '{}');
+    }
+
+    /**
+     * With the book for others capability, acting on another user through the slot
+     * picker webservices keeps working (e.g. trainers preparing a booking).
+     */
+    public function test_slot_picker_allows_foreign_userid_with_bookforothers(): void {
+        [$option, $userid] = $this->create_fixed_slot_option();
+
+        $other = self::getDataGenerator()->create_user();
+        $systemcontext = \context_system::instance();
+        $roleid = create_role('Booking staff', 'bookingstaff', '');
+        assign_capability('mod/booking:choose', CAP_ALLOW, $roleid, $systemcontext->id);
+        assign_capability('mod/booking:bookforothers', CAP_ALLOW, $roleid, $systemcontext->id);
+        role_assign($roleid, $other->id, $systemcontext->id);
+
+        $this->setUser($other);
+        singleton_service::destroy_instance();
+
+        $slots = json_decode(get_slots::execute($option->id, $userid)['slots'], true);
+        $this->assertNotEmpty($slots);
+
+        $result = save_slot_selection::execute($option->id, $userid, json_encode([$slots[0]['key']]), '{}');
+        $result = \core_external\external_api::clean_returnvalue(save_slot_selection::execute_returns(), $result);
+        $this->assertTrue($result['valid']);
+        $this->assertSame([], json_decode($result['errors'], true));
     }
 
     /**

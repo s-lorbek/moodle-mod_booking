@@ -372,10 +372,9 @@ class bookingoption_description implements renderable, templatable {
         }
 
         if (has_capability('mod/booking:downloadchecklist', $modcontext) && get_config('booking', 'showchecklistdownloadbutton')) {
-            $checkboxurl = $link = new moodle_url($CFG->wwwroot . '/mod/booking/report.php', [
-                'id' => $cmid,
+            $checkboxurl = new moodle_url($CFG->wwwroot . '/mod/booking/download_checklist.php', [
+                'cmid' => $cmid,
                 'optionid' => $optionid,
-                'action' => 'downloadchecklist',
             ]);
             $this->showchecklistdownloadbutton = $checkboxurl;
         }
@@ -648,7 +647,11 @@ class bookingoption_description implements renderable, templatable {
                 booking_answers::add_availability_info_texts_to_booking_information($this->bookinginformation);
 
                 // We set usertobuyfor here for better performance.
-                $this->usertobuyfor = price::return_user_to_buy_for();
+                // An explicitly passed foreign user (capability-checked by optionview.php)
+                // wins. For the own user (or none), the request-bound resolution
+                // (shopping cart cashier param, else the logged-in user) applies.
+                $buyforuserid = ((int)$this->userid === (int)$USER->id) ? 0 : (int)$this->userid;
+                $this->usertobuyfor = price::return_user_to_buy_for($buyforuserid);
 
                 $this->bookitsection = booking_bookit::render_bookit_button($settings, $this->usertobuyfor->id);
 
@@ -781,8 +784,8 @@ class bookingoption_description implements renderable, templatable {
         // In plugin settings, we can choose customfields we want to have rendered together.
         $returnarray['optionviewcustomfields'] =
             $this->build_configcustomfields_html($returnarray, 'optionviewcustomfields', 'optionview-customfield');
-        $returnarray['cardviewcustomfields'] =
-            $this->build_configcustomfields_html($returnarray, 'cardviewcustomfields', 'cardview-customfield');
+        $returnarray['cardoptionviewcustomfields'] =
+            $this->build_configcustomfields_html($returnarray, 'cardoptionviewcustomfields', 'cardview-customfield');
         return $returnarray;
     }
 
@@ -798,11 +801,34 @@ class bookingoption_description implements renderable, templatable {
         if (!empty($cfstoshowstring = get_config('booking', $configkey))) {
             foreach (explode(',', $cfstoshowstring) as $cftoshow) {
                 if (!empty($returnarray[$cftoshow])) {
-                    $html .= "<div class='{$cssprefix}-{$cftoshow}'>" . $returnarray[$cftoshow] . "</div>";
+                    $icon = $this->build_customfield_icon_html($cftoshow);
+                    $html .= "<div class='{$cssprefix}-{$cftoshow}'>" . $icon . $returnarray[$cftoshow] . "</div>";
                 }
             }
         }
         return $html;
+    }
+
+    /**
+     * Build the Font Awesome icon tag configured for a custom field, or '' if none is set.
+     * The icon is shared across all views (detail page and card).
+     * @param string $shortname the custom field shortname
+     * @return string the <i> tag with a trailing space, or an empty string
+     */
+    private function build_customfield_icon_html(string $shortname): string {
+        $icon = trim((string) get_config('booking', 'customfieldicon_' . $shortname));
+        if (empty($icon)) {
+            return '';
+        }
+        // The admin enters the Font Awesome icon class.
+        // Only accept a valid CSS-class string (letters, digits, dashes, underscores, spaces).
+        if (!preg_match('/^[a-z0-9 _-]+$/i', $icon)) {
+            return '';
+        }
+        return html_writer::tag('i', '', [
+            'class' => 'fa fa-fw ' . $icon,
+            'aria-hidden' => 'true',
+        ]) . ' ';
     }
 
     /**

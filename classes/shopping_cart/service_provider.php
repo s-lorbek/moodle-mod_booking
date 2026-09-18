@@ -387,11 +387,9 @@ class service_provider implements \local_shopping_cart\local\callback\service_pr
                 } else {
                     $value = $settings->$match ?? get_string('invalidplaceholder', 'mod_booking');
                 }
-
                 if (is_numeric($value)) {
                     $value = userdate(time(), get_string('strftimedaydate', 'core_langconfig'));
                 }
-
                 $replacements['{' . $match . '}'] = (string)$value;
             }
 
@@ -789,15 +787,24 @@ class service_provider implements \local_shopping_cart\local\callback\service_pr
      *
      * @param string $area
      * @param int $itemid An identifier that is known to the plugin
+     * @param int $userid the user whose purchase would be cancelled, defaults to the current user
+     *                    (local_shopping_cart only asks for non-cashiers, who can only cancel their own purchases)
      *
      * @return bool true if cancelling is allowed, else false
      */
-    public static function allowed_to_cancel(string $area, int $itemid): bool {
+    public static function allowed_to_cancel(string $area, int $itemid, int $userid = 0): bool {
+        global $USER;
+
         $allowedtocancel = true;
         // Currently, we only check this for options.
         // Maybe we will need additional areas in the future.
         if ($area == 'option') {
             if (empty($itemid)) {
+                return false;
+            }
+
+            // Somebody else is booked via the enrollink of this purchase: the booker cannot cancel anymore.
+            if (enrollink::cancellation_blocked_by_used_enrollink($userid ?: (int)$USER->id, $itemid)) {
                 return false;
             }
 
@@ -1018,5 +1025,64 @@ class service_provider implements \local_shopping_cart\local\callback\service_pr
             }
         }
         return true;
+    }
+
+    /**
+     * Resolve human-readable item names for a list of item ids.
+     *
+     * This optional adapter callback is used by local_shopping_cart coupon UI.
+     *
+     * @param int[] $itemids
+     * @param string $area
+     * @return array<int, string>
+     */
+    public static function resolve_item_names(array $itemids, string $area = 'option'): array {
+        // Coupon bindings in booking are currently option-based.
+        if ($area !== 'option' || empty($itemids)) {
+            return [];
+        }
+
+        $names = [];
+        foreach (array_unique(array_map('intval', $itemids)) as $itemid) {
+            $settings = singleton_service::get_instance_of_booking_option_settings($itemid);
+            if (empty($settings->id)) {
+                // Deleted option, caller falls back to a generic label.
+                continue;
+            }
+            $names[$itemid] = $settings->get_title_with_prefix();
+        }
+
+        return $names;
+    }
+
+    /**
+     * Resolve view links for a list of item ids.
+     *
+     * This optional adapter callback is used by local_shopping_cart coupon UI.
+     *
+     * @param int[] $itemids
+     * @param string $area
+     * @return array<int, string>
+     */
+    public static function resolve_item_links(array $itemids, string $area = 'option'): array {
+        // Coupon bindings in booking are currently option-based.
+        if ($area !== 'option' || empty($itemids)) {
+            return [];
+        }
+
+        $links = [];
+        foreach (array_unique(array_map('intval', $itemids)) as $itemid) {
+            $settings = singleton_service::get_instance_of_booking_option_settings($itemid);
+            if (empty($settings->id) || empty($settings->cmid)) {
+                continue;
+            }
+            $links[$itemid] = (new \moodle_url('/mod/booking/view.php', [
+                'id' => $settings->cmid,
+                'optionid' => $itemid,
+                'whichview' => 'showonlyone',
+            ]))->out(false);
+        }
+
+        return $links;
     }
 }

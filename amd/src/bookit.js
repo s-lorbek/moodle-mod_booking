@@ -120,6 +120,79 @@ const getInlinePrepageConfig = (optionid, userid = 0) => {
     return inlineprepageconfig[optionid];
 };
 
+/** @type {Object.<string, string>} The two templates which render the entry point of the prepages. */
+export const PREPAGE_TEMPLATES = {
+    MODAL: 'mod_booking/bookingpage/prepagemodal',
+    INLINE: 'mod_booking/bookingpage/prepageinline',
+};
+
+/**
+ * Returns the prepage template that matches what is already rendered on the page.
+ *
+ * Whether the pre booking pages are shown in a modal or inline (site setting
+ * booking | turnoffmodals) is decided when the page is rendered. A webservice which re-renders the
+ * book it button afterwards does not necessarily know which view the user is looking at, so we
+ * derive it from the DOM. Both templates receive identical data, only the container differs.
+ *
+ * @param {?HTMLElement} wrapper the element wrapping the book it button (toggles modal or collapse)
+ * @param {string} fallback the template name returned by the server
+ * @returns {string}
+ */
+export const returnMatchingPrepageTemplate = (wrapper, fallback) => {
+
+    const toggle = wrapper?.dataset.bsToggle ?? wrapper?.dataset.toggle;
+
+    if (toggle === 'collapse') {
+        return PREPAGE_TEMPLATES.INLINE;
+    }
+
+    if (toggle === 'modal') {
+        return PREPAGE_TEMPLATES.MODAL;
+    }
+
+    return fallback;
+};
+
+/**
+ * Finds the container the inline prepage area should be moved into.
+ *
+ * The inline area has to span the whole width of the booking option row, otherwise it is squeezed
+ * into the (narrow) column which holds the book it button. Which element represents "the row"
+ * depends on the template that renders the table - mod_booking's own list and cards templates mark
+ * it with .mod-booking-row, but other plugins use their own
+ * row markup. So we fall back to the row element of the wunderbyte table and finally to any card
+ * like wrapper. Returns null when nothing suitable is found - in that case the inline area simply
+ * stays where it was rendered.
+ *
+ * @param {HTMLElement} button the clicked book it button
+ * @returns {?HTMLElement}
+ */
+const returnInlineTargetContainer = button => {
+
+    // Preferred: the row markup of the mod_booking templates.
+    const modbookingrow = button.closest('.mod-booking-row');
+    if (modbookingrow) {
+        return modbookingrow;
+    }
+
+    // Any wunderbyte table renders its rows into a .rows-container, so the direct child of that
+    // container is the row of this booking option, no matter which template is used.
+    const rowscontainer = button.closest('.rows-container');
+    if (rowscontainer) {
+        let row = button;
+        while (row && row.parentElement !== rowscontainer) {
+            row = row.parentElement;
+        }
+        if (row) {
+            // Most row templates wrap their content into a full width .content element.
+            return row.querySelector(':scope > .content') ?? row;
+        }
+    }
+
+    // Last resort for markup which is not rendered into a .rows-container (e.g. grid templates).
+    return button.closest('.wunderbyteTableJavascript, .grid-entry, .list-group-item, .card');
+};
+
 /**
  * Function to check visibility of element.
  * @param {*} el
@@ -190,12 +263,15 @@ export var SELECTORS = {
     MODALFOOTER: 'div.modalFooter',
     CONTINUEBUTTON: 'a.continue-button',
     BACKBUTTON: 'a.back-button',
-    BOOKITBUTTON_NOPRICE: 'div.booking-button-area.noprice',
-    BOOKITBUTTON_SHOPPINGCART: 'div.booking-button-area.wb_shopping_cart',
-    BOOKITBUTTON: 'div.booking-button-area.noprice, div.booking-button-area.wb_shopping_cart',
+    // No tag names here: the shopping cart button is a <button> element so that it can be operated
+    // with ENTER and SPACE, and a <span> when it is rendered inside a "book on detail page" link
+    // (see local_shopping_cart/addtocartdb). Matching on the classes covers all of them.
+    BOOKITBUTTON_NOPRICE: '.booking-button-area.noprice',
+    BOOKITBUTTON_SHOPPINGCART: '.booking-button-area.wb_shopping_cart',
+    BOOKITBUTTON: '.booking-button-area.noprice, .booking-button-area.wb_shopping_cart',
     BOOKITBUTTON_WITH_DATA:
-        'div.booking-button-area.noprice[data-itemid][data-area], ' +
-        'div.booking-button-area.wb_shopping_cart[data-itemid][data-area]',
+        '.booking-button-area.noprice[data-itemid][data-area], ' +
+        '.booking-button-area.wb_shopping_cart[data-itemid][data-area]',
     INMODALBUTTON: 'div.in-modal-button',
     STATICBACKDROP: 'div.modal-backdrop',
 };
@@ -223,6 +299,16 @@ const getVisibleModalBookitButtonSelector = (itemid, area) => {
     return `[id^='${SELECTORS.MODALID}'].show ${SELECTORS.BOOKITBUTTON_NOPRICE}[data-itemid='${itemid}'][data-area='${area}'], ` +
         `[id^='${SELECTORS.MODALID}'].show ${SELECTORS.BOOKITBUTTON_SHOPPINGCART}[data-itemid='${itemid}'][data-area='${area}']`;
 };
+
+/**
+ * Checks whether the booking option detail page (optionview.php) is currently shown.
+ *
+ * Only the path is compared, deliberately not the whole href: optionview.php passes its own URL
+ * on as the returnurl parameter, so a page linking back to it would match a plain href search.
+ *
+ * @returns {boolean}
+ */
+const isOptionDetailsPage = () => window.location.pathname.endsWith('/mod/booking/optionview.php');
 
 /**
  * Resolve a stricter replace target for rendered button markup.
@@ -357,7 +443,10 @@ export const initbookitbutton = () => {
                 return;
             }
 
-            const bookTarget = e.target.closest('.btn');
+            // "button.booking-button-mainarea" in addition to ".btn": the main area of a bookit
+            // button is a real <button> now (keyboard operable), and a few conditions style it as an
+            // alert instead of a .btn - those would otherwise look interactive but do nothing.
+            const bookTarget = e.target.closest('.btn, button.booking-button-mainarea');
 
             // Ignore disabled buttons
             if (button.classList.contains('disabled')) {
@@ -495,17 +584,37 @@ export function bookit(itemid, area, userid, data, clickedFromModal = null) {
                         const data = arraytoreduce.shift();
                         const shortHash = Math.random().toString(36).slice(2, 7);
                         const datatorender = data.data ?? data;
+                        let rendertemplate = template;
 
                         if (
-                            template === "mod_booking/bookingpage/prepagemodal"
-                            || template === "mod_booking/bookingpage/prepageinline"
+                            template === PREPAGE_TEMPLATES.MODAL
+                            || template === PREPAGE_TEMPLATES.INLINE
                         ) {
                             if (resolvedClickedFromModal) {
                                 // For clicks inside modal content, update that modal button directly.
                                 button = originalbutton;
                             } else {
+                                // The toggle wrapper only exists when the button area currently
+                                // rendered on the page IS a prepage entry point. It is missing
+                                // whenever the server switches INTO the prepage rendering: while
+                                // the option is booked, alreadybooked suppresses the prepage modal
+                                // and the area is a plain bookit_button, so confirming the cancel
+                                // button next to it makes the option bookable again and the answer
+                                // comes back as a prepagemodal/-inline template. Without the
+                                // fallback there is nothing to replace at all. In the list views
+                                // the table reload after a cancellation re-renders the row and
+                                // hides that, but the details page (optionview.php) has no table,
+                                // so the cancellation stayed invisible until a manual reload.
                                 button = button.closest('div[data-bs-toggle="modal"]')
-                                    ?? button.closest('div[data-bs-toggle="collapse"]');
+                                    ?? button.closest('div[data-bs-toggle="collapse"]')
+                                    ?? originalbutton;
+
+                                // The server cannot always know which view is rendered on the client
+                                // (a shortcode can render a list for an instance configured as cards
+                                // and vice versa). Both templates get exactly the same data, so we
+                                // just keep whatever the page already uses. Otherwise a booking
+                                // action would turn an inline area into a modal or vice versa.
+                                rendertemplate = returnMatchingPrepageTemplate(button, template);
                             }
                             datatorender.uniquid = shortHash;
 
@@ -537,7 +646,7 @@ export function bookit(itemid, area, userid, data, clickedFromModal = null) {
                             });
                             promises.push(promise);
                         } else {
-                            const promise = Templates.renderForPromise(template, datatorender).then(({ html, js }) => {
+                            const promise = Templates.renderForPromise(rendertemplate, datatorender).then(({ html, js }) => {
 
                                 // Here, we might need to replace the parent node instead of button.
 
@@ -581,6 +690,18 @@ export function bookit(itemid, area, userid, data, clickedFromModal = null) {
                 // last page, total kept) and would wrongly suppress the table reload here.
                 if (Number(res.status || 0) === 1 && res.message === 'cancelled') {
                     skipreload = false;
+
+                    // The detail page renders a lot of state which the answer of the bookit
+                    // webservice does not carry and the button replacement therefore cannot
+                    // update: the status text of the option or instance (beforebookedtext,
+                    // beforecompletedtext, aftercompletedtext) and the remaining places. All of
+                    // them change with a cancellation, so the page is reloaded as a whole - the
+                    // same treatment a booking gets when the pre booking pages are closed
+                    // (reloadOnBookingView in bookingpage/prepageFooter).
+                    if (isOptionDetailsPage()) {
+                        window.location.reload();
+                        return true;
+                    }
                 }
 
                 if (!skipreload && (!backdrop || resolvedClickedFromModal)) {
@@ -714,26 +835,34 @@ export const initprepageinline = (optionid, userid, totalnumberofpages, uniquid)
                 return;
             }
 
-            // Get the row element.
-            const rowcontainer = button.closest('.mod-booking-row');
-            if (!rowcontainer || !rowcontainer.lastElementChild) {
+            const inlinediv = returnVisibleElement(optionid, config.uniquid, SELECTORS.INMODALDIV);
+            if (!inlinediv) {
                 return;
             }
 
-            const transferarea = !rowcontainer.lastElementChild.classList.contains('inlineprepagearea');
-            // We move the inlineprepagearea only if we need to.
-            if (transferarea) {
-                const inlinediv = returnVisibleElement(optionid, config.uniquid, SELECTORS.INMODALDIV);
-                if (!inlinediv) {
-                    return;
-                }
-
-                rowcontainer.append(inlinediv.closest('.inlineprepagearea'));
-                // Inlinediv.remove();
-
-                // We need to get all prepage modals on this site. Make sure they are initialized.
-                loadPreBookingPage(optionid, config.userid, config.uniquid);
+            const inlinearea = inlinediv.closest('.inlineprepagearea');
+            if (!inlinearea) {
+                return;
             }
+
+            // Move the inline area to the end of the booking option row, so that it can use the
+            // full width. If we cannot identify a row container, we leave it where it is - the
+            // pages are loaded either way, which is what actually matters.
+            const rowcontainer = returnInlineTargetContainer(button);
+            if (rowcontainer && rowcontainer.lastElementChild !== inlinearea) {
+                rowcontainer.append(inlinearea);
+            }
+
+            // Bootstrap toggles the collapse on the very same click, so at this point the class
+            // still reflects the state BEFORE the click. We only (re)load the pages when the area
+            // is about to be opened - not when the user closes it again.
+            const collapse = inlinediv.closest('.prepage-inline');
+            if (collapse && collapse.classList.contains('show')) {
+                return;
+            }
+
+            // We need to get all prepage modals on this site. Make sure they are initialized.
+            loadPreBookingPage(optionid, config.userid, config.uniquid);
         });
     }
 };

@@ -126,6 +126,7 @@ class mod_booking_generator extends testing_module_generator {
         userprofilefield_2_custom::reset_instance();
         booking_rules::$rules = [];
         price::destroy_singletons();
+        booking_time::destroy_instances();
         // Slotbooking static caches.
         slot_availability::reset_caches();
         slot_rules::reset_caches();
@@ -163,14 +164,17 @@ class mod_booking_generator extends testing_module_generator {
             'assessed' => 0,
             'showviews' => 'showall,showactive,mybooking,myoptions,optionsiamresponsiblefor,myinstitution',
             'whichview' => 'showall',
-            'optionsfields' => 'description,statusdescription,teacher,showdates,dayofweektime,
-                                location,institution,minanswers',
-            'reportsfields' => 'optionid,booking,institution,location,coursestarttime,
-                                city,department,courseendtime,numrec,userid,username,
-                                firstname,lastname,email,completed,waitinglist,status,
-                                groups,notes,idnumber',
-            'responsesfields' => 'completed,status,rating,numrec,fullname,timecreated,
-                                institution,waitinglist,city,department,notes',
+            // No optionsfields on purpose: booking_add_instance() falls back to
+            // MOD_BOOKING_BOOKINGOPTION_DEFAULTFIELDS, which is the column set the
+            // behat features expect (responsiblecontact, coursestarttime, ...).
+            'reportfields' => 'optionid,booking,institution,location,coursestarttime,city,department,' .
+                'courseendtime,numrec,userid,username,firstname,lastname,email,completed,waitinglist,' .
+                'status,groups,notes,idnumber',
+            // No institution here: the column was line wrapped out of this list for as long as
+            // the behat features exist, and several of them assert positional column ids
+            // (#mod_booking_all_users_sort_new_r0_cN). Adding it back shifts every id behind it.
+            'responsesfields' => 'completed,status,rating,numrec,fullname,timecreated,' .
+                'waitinglist,city,department,notes',
             'sendmail' => 1,
 
         ];
@@ -278,6 +282,17 @@ class mod_booking_generator extends testing_module_generator {
         $this->bookingoptions++;
 
         $record = (object) $record;
+
+        // A seed carrying an indexed date row (coursestarttime_<n>) without the matching
+        // optiondateid_<n> would silently persist NO date at all: dates::
+        // get_list_of_submitted_dates() only parses indexed rows keyed by optiondateid_.
+        // Inject the missing marker (0 = new date) so test seeds always mean what they say.
+        foreach (preg_grep('/^coursestarttime_\d+$/', array_keys((array) $record)) as $key) {
+            $idkey = 'optiondateid_' . substr($key, strlen('coursestarttime_'));
+            if (!property_exists($record, $idkey)) {
+                $record->{$idkey} = 0;
+            }
+        }
 
         // Finalizing object with required properties.
         $record->id = $record->id ?? 0;

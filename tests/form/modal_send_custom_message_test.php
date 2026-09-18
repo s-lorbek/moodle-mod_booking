@@ -137,14 +137,15 @@ final class modal_send_custom_message_test extends advanced_testcase {
      * Returns the option settings and a userid-indexed array of user objects.
      *
      * @param int $numusers
+     * @param array $bookingparams additional params for the booking instance (e.g. bookingmanager)
      * @return array{0: \mod_booking\booking_option_settings, 1: array<int, \stdClass>}
      */
-    private function create_booked_option(int $numusers = 2): array {
+    private function create_booked_option(int $numusers = 2, array $bookingparams = []): array {
         $course = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
-        $booking = $this->getDataGenerator()->create_module('booking', [
+        $booking = $this->getDataGenerator()->create_module('booking', array_merge([
             'name'   => 'Attachment test booking',
             'course' => $course->id,
-        ]);
+        ], $bookingparams));
 
         /** @var mod_booking_generator $gen */
         $gen = self::getDataGenerator()->get_plugin_generator('mod_booking');
@@ -340,6 +341,206 @@ final class modal_send_custom_message_test extends advanced_testcase {
                 "Stored_file content must match original for user {$uid}."
             );
         }
+    }
+
+    /**
+     * Test: the global setting bookingstrackermessagesender controls the sender of the
+     * messages sent from the bookings tracker modals: by default the booking manager of
+     * the instance is used (behaviour as before), with the setting active the logged-in
+     * user actually sending the message is used.
+     *
+     * @covers \mod_booking\form\modal_send_custom_message::process_dynamic_submission
+     * @covers \mod_booking\message_controller::set_sender
+     */
+    public function test_message_sender_respects_global_setting(): void {
+        $this->resetAfterTest(true);
+        singleton_service::destroy_instance();
+
+        $manager = $this->getDataGenerator()->create_user([
+            'firstname' => 'Betty',
+            'lastname'  => 'Bookingmanager',
+            'email'     => 'manager@example.com',
+        ]);
+        $this->setAdminUser();
+        $adminuser = get_admin();
+
+        [$settings, $users] = $this->create_booked_option(1, ['bookingmanager' => $manager->username]);
+        $recipient = reset($users);
+
+        $ajaxargs = [
+            'cmid'            => (int)$settings->cmid,
+            'optionid'        => (int)$settings->id,
+            'checkedids'      => '',
+            'selecteduserids' => [(int)$recipient->id],
+            'subject'         => 'Sender setting subject',
+            'message'         => ['text' => 'Sender setting body', 'format' => FORMAT_HTML],
+        ];
+
+        // Default setting: the booking manager of the instance is the sender.
+        $sink = $this->redirectMessages();
+        $submitdata = modal_send_custom_message::mock_ajax_submit($ajaxargs);
+        $mform = new modal_send_custom_message(null, null, 'post', '', [], true, $submitdata, true);
+        $mform->process_dynamic_submission();
+        $messages = $sink->get_messages();
+        $sink->close();
+
+        $this->assertCount(1, $messages);
+        $this->assertEquals(
+            (int)$manager->id,
+            (int)$messages[0]->useridfrom,
+            'With the default setting the booking manager must be the sender.'
+        );
+
+        // Setting "logged-in user": the user actually sending the message is the sender.
+        set_config('bookingstrackermessagesender', 1, 'booking');
+
+        $sink = $this->redirectMessages();
+        $submitdata = modal_send_custom_message::mock_ajax_submit($ajaxargs);
+        $mform = new modal_send_custom_message(null, null, 'post', '', [], true, $submitdata, true);
+        $mform->process_dynamic_submission();
+        $messages = $sink->get_messages();
+        $sink->close();
+
+        $this->assertCount(1, $messages);
+        $this->assertEquals(
+            (int)$adminuser->id,
+            (int)$messages[0]->useridfrom,
+            'With the setting active the logged-in user must be the sender.'
+        );
+    }
+
+    /**
+     * Test: mails sent from the bookings tracker modals carry an explicit reply-to
+     * header pointing to the resolved sender. Core email_to_user() replaces the
+     * visible from address with the noreply address unless the sender's domain is
+     * listed in $CFG->allowedemaildomains, so the reply-to header is what allows
+     * recipients to answer the sender directly.
+     *
+     * @covers \mod_booking\message_controller::set_sender
+     */
+    public function test_custom_message_replyto_points_to_resolved_sender(): void {
+        // Messages to conversations are buffered while a DB transaction is open,
+        // so the email processor would never run inside the test rollback transaction.
+        $this->preventResetByRollback();
+        $this->resetAfterTest(true);
+        singleton_service::destroy_instance();
+
+        $manager = $this->getDataGenerator()->create_user([
+            'firstname' => 'Betty',
+            'lastname'  => 'Bookingmanager',
+            'email'     => 'manager@example.com',
+        ]);
+        $this->setAdminUser();
+        $adminuser = get_admin();
+
+        [$settings, $users] = $this->create_booked_option(1, ['bookingmanager' => $manager->username]);
+        $recipient = reset($users);
+
+        $ajaxargs = [
+            'cmid'            => (int)$settings->cmid,
+            'optionid'        => (int)$settings->id,
+            'checkedids'      => '',
+            'selecteduserids' => [(int)$recipient->id],
+            'subject'         => 'Reply-to subject',
+            'message'         => ['text' => 'Reply-to body', 'format' => FORMAT_HTML],
+        ];
+
+        // Default setting: replies must reach the booking manager.
+        $mailsink = $this->redirectEmails();
+        $submitdata = modal_send_custom_message::mock_ajax_submit($ajaxargs);
+        $mform = new modal_send_custom_message(null, null, 'post', '', [], true, $submitdata, true);
+        $mform->process_dynamic_submission();
+        $mails = $mailsink->get_messages();
+        $this->assertCount(1, $mails);
+        $this->assertNotEquals(
+            $manager->email,
+            $mails[0]->from,
+            'Without allowedemaildomains core must replace the from address with noreply.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/Reply-To:[^\r\n]*manager@example\.com/i',
+            $mails[0]->header,
+            'Replies must go to the booking manager.'
+        );
+        $mailsink->clear();
+
+        // Setting "logged-in user": replies must reach the user sending the message.
+        set_config('bookingstrackermessagesender', 1, 'booking');
+        $submitdata = modal_send_custom_message::mock_ajax_submit($ajaxargs);
+        $mform = new modal_send_custom_message(null, null, 'post', '', [], true, $submitdata, true);
+        $mform->process_dynamic_submission();
+        $mails = $mailsink->get_messages();
+        $mailsink->close();
+        $this->assertCount(1, $mails);
+        $this->assertMatchesRegularExpression(
+            '/Reply-To:[^\r\n]*' . preg_quote($adminuser->email, '/') . '/i',
+            $mails[0]->header,
+            'Replies must go to the logged-in sender.'
+        );
+    }
+
+    /**
+     * Test: the default send path WITHOUT set_sender() — used by all mails outside the
+     * bookings tracker modals, in particular the booking rules (send_mail_by_rule_adhoc
+     * constructs the message_controller exactly like this) — is not affected by the
+     * reply-to override of set_sender(): no reply-to pointing to the resolved sender
+     * is added, core email_to_user() keeps full control over from and reply-to.
+     *
+     * @covers \mod_booking\message_controller::send_or_queue
+     */
+    public function test_default_send_path_without_set_sender_keeps_replyto_untouched(): void {
+        // Messages to conversations are buffered while a DB transaction is open,
+        // so the email processor would never run inside the test rollback transaction.
+        $this->preventResetByRollback();
+        $this->resetAfterTest(true);
+        singleton_service::destroy_instance();
+
+        $manager = $this->getDataGenerator()->create_user([
+            'firstname' => 'Betty',
+            'lastname'  => 'Bookingmanager',
+            'email'     => 'manager@example.com',
+        ]);
+        $this->setAdminUser();
+
+        [$settings, $users] = $this->create_booked_option(1, ['bookingmanager' => $manager->username]);
+        $recipient = reset($users);
+
+        $mailsink = $this->redirectEmails();
+
+        // Same construction as in send_mail_by_rule_adhoc (booking rules) — no set_sender() call.
+        $messagecontroller = new message_controller(
+            MOD_BOOKING_MSGCONTRPARAM_SEND_NOW,
+            MOD_BOOKING_MSGPARAM_CUSTOM_MESSAGE,
+            (int)$settings->cmid,
+            (int)$settings->id,
+            (int)$recipient->id,
+            (int)$settings->bookingid,
+            null,
+            null,
+            'Rules mail subject',
+            'Rules mail body'
+        );
+        $sent = $messagecontroller->send_or_queue();
+
+        $mails = $mailsink->get_messages();
+        $mailsink->close();
+
+        $this->assertTrue($sent);
+        $this->assertCount(1, $mails);
+        // Core default behaviour as before: without allowedemaildomains both the visible
+        // from address and the reply-to stay the noreply address — no reply-to override
+        // pointing to the booking manager may appear.
+        $this->assertMatchesRegularExpression(
+            '/^Reply-To:[^\r\n]*noreply/im',
+            $mails[0]->header,
+            'Without set_sender the reply-to must stay the core noreply default.'
+        );
+        $this->assertDoesNotMatchRegularExpression(
+            '/^Reply-To:[^\r\n]*manager@example\.com/im',
+            $mails[0]->header,
+            'Without set_sender no reply-to override to the sender may be added.'
+        );
+        $this->assertStringContainsString('noreply', $mails[0]->from);
     }
 
     /**

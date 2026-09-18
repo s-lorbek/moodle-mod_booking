@@ -16,7 +16,7 @@
 
 namespace mod_booking;
 
-use mod_booking\booking_advanced_testcase;
+use mod_booking\tests\booking_advanced_testcase;
 use context_system;
 use mod_booking_generator;
 use mod_booking\output\bookingoption_description;
@@ -58,6 +58,8 @@ final class booking_customfields_on_optionview_test extends booking_advanced_tes
 
         $this->create_booking_customfields();
         set_config('optionviewcustomfields', '0,spt1,dtime,dtext,ddownmenu,dnumber,dynamicuser', 'booking');
+        // Configure a Font Awesome icon for one of the custom fields.
+        set_config('customfieldicon_spt1', 'fa-futbol-o', 'booking');
 
         $course = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
         $booking = $this->getDataGenerator()->create_module('booking', [
@@ -90,6 +92,11 @@ final class booking_customfields_on_optionview_test extends booking_advanced_tes
 
         $this->assertStringContainsString('optionview-customfield-spt1', $customfieldshtml);
         $this->assertStringContainsString('tenis', $customfieldshtml);
+        // The configured icon is rendered before the field value.
+        $this->assertMatchesRegularExpression(
+            '/optionview-customfield-spt1.*<i class="fa fa-fw fa-futbol-o"/s',
+            $customfieldshtml
+        );
 
         $this->assertStringContainsString('optionview-customfield-dtime', $customfieldshtml);
         $this->assertMatchesRegularExpression('/optionview-customfield-dtime.*2044/s', $customfieldshtml);

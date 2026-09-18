@@ -35,6 +35,10 @@ use stdClass;
 use moodle_url;
 use Throwable;
 
+defined('MOODLE_INTERNAL') || die();
+
+require_once($CFG->dirroot . '/mod/booking/lib.php');
+
 /**
  * Settings class for booking option instances.
  *
@@ -373,6 +377,15 @@ class booking_option_settings {
     }
 
     /**
+     * Whether this option is a self-learning course: no option dates and no official start or end.
+     *
+     * @return bool
+     */
+    public function is_selflearningcourse(): bool {
+        return (int) $this->type === MOD_BOOKING_OPTIONTYPE_SELFLEARNINGCOURSE;
+    }
+
+    /**
      * Set all the values from DB, if necessary.
      * If we have passed on the cached object, we use this one.
      *
@@ -404,6 +417,8 @@ class booking_option_settings {
                 $context = context_system::instance();
             }
 
+            // The select/from/where fragments are internal SQL built by get_options_filter_sql().
+            // They never contain raw values: everything variable is bound via $params placeholders.
             [$select, $from, $where, $params] = booking::get_options_filter_sql(
                 0,
                 1,
@@ -717,7 +732,10 @@ class booking_option_settings {
             $this->localize_customfields_for_templates();
 
             // If slot config is not present in cache object, load it once and cache it.
-            if (!isset($dbrecord->slotconfig)) {
+            // Options without a slot config legitimately cache NULL here, so we must
+            // check with property_exists: isset(null) would re-trigger the DB query
+            // on every single instantiation despite a warm cache (issue #2207).
+            if (!property_exists($dbrecord, 'slotconfig')) {
                 $this->load_slot_config_from_db($optionid);
                 $dbrecord->slotconfig = $this->slotconfig;
             } else {
@@ -1385,7 +1403,6 @@ class booking_option_settings {
         This allows us to systematically build the sql to get all the relevant information.
     */
 
-
     /**
      * Function to include all the values of one given customfield to a table bo.
      * The table is joined via bo.id=cfd.instanceid.
@@ -1408,6 +1425,7 @@ class booking_option_settings {
          $customfields = booking_handler::get_customfields($selectedshortnames);
 
          $select = '';
+         $selectparts = [];
          $from = '';
          $where = '';
          $params = [];
@@ -1430,12 +1448,7 @@ class booking_option_settings {
                 );
             }
 
-            $select .= "cfd$counter.value as $name ";
-
-            // Append comma if not the last element.
-            if ($counter < count($customfields)) {
-                $select .= ", ";
-            }
+            $selectparts[] = "cfd$counter.value as $name";
 
             // Add LEFT JOIN using the known field ID.
             $from .= " LEFT JOIN {customfield_data} cfd$counter
@@ -1456,6 +1469,11 @@ class booking_option_settings {
             }
 
             $counter++;
+        }
+
+        $select = implode(', ', $selectparts);
+        if (!empty($select)) {
+            $select .= ' ';
         }
 
         return [$select, $from, $where, $params];
@@ -1526,7 +1544,9 @@ class booking_option_settings {
 
         global $DB;
 
-        $select = $DB->sql_group_concat('bt1.teacherobject') . ' as teacherobjects';
+        // The teachers are already aggregated to one row per option inside the subquery (bt1),
+        // so the outer select does not need any GROUP BY for this column.
+        $select = 'bt1.teacherobjects as teacherobjects';
 
         // We have to create the teacher object beforehand, in order to be able to use group_concat afterwards.
         $innerselect = $DB->sql_concat_join("''", [
@@ -1547,10 +1567,11 @@ class booking_option_settings {
 
         $from = 'LEFT JOIN
         (
-            SELECT bt.optionid, ' . $innerselect . ' as teacherobject
+            SELECT bt.optionid, ' . $DB->sql_group_concat($innerselect) . ' as teacherobjects
             FROM {booking_teachers} bt
             JOIN {user} u
             ON bt.userid = u.id
+            GROUP BY bt.optionid
         ) bt1
         ON bt1.optionid = bo.id';
 

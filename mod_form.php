@@ -29,6 +29,7 @@ use mod_booking\elective;
 use mod_booking\output\eventslist;
 use mod_booking\placeholders\placeholders_info;
 use mod_booking\semester;
+use mod_booking\signinsheet\signinsheet_config;
 use mod_booking\singleton_service;
 use mod_booking\utils\wb_payment;
 
@@ -519,6 +520,7 @@ class mod_booking_mod_form extends moodleform_mod {
             'places' => get_string('places', 'mod_booking'),
             'fullname' => get_string('fullname', 'mod_booking'),
             'timecreated' => get_string('timecreated', 'mod_booking'),
+            'timebooked' => get_string('timebooked', 'mod_booking'),
             'institution' => get_string('institution', 'mod_booking'),
             'waitinglist' => get_string('searchwaitinglist', 'mod_booking'),
             'city' => new lang_string('city'),
@@ -551,6 +553,7 @@ class mod_booking_mod_form extends moodleform_mod {
             'notes' => get_string('notes', 'mod_booking'),
             'idnumber' => get_string("idnumber"),
             'timecreated' => get_string('timecreated', 'mod_booking'),
+            'timebooked' => get_string('timebooked', 'mod_booking'),
             'completeddate' => get_string('completeddate', 'mod_booking'),
         ];
 
@@ -656,16 +659,77 @@ class mod_booking_mod_form extends moodleform_mod {
                 $name = format_string($cf->name);
                 $customfieldshortnames[$cf->shortname] = "$name ($cf->shortname)";
             }
+            $options = [
+                'multiple' => true,
+                'tags' => false,
+                'noselectionstring' => get_string('choose...', 'mod_booking'),
+            ];
             $mform->addElement(
-                'select',
+                'autocomplete',
                 'customfieldsforfilter',
                 get_string('customfieldsforfilter', 'mod_booking'),
-                $customfieldshortnames
+                $customfieldshortnames,
+                $options
             );
-            $mform->getElement('customfieldsforfilter')->setMultiple(true);
             $preset = (array)booking::get_value_of_json_by_key($bookingid, 'customfieldsforfilter') ?? [];
             $mform->setDefault('customfieldsforfilter', array_keys($preset));
+
+            // Custom fields to be shown for each booking option in the options overview (view.php).
+            $options = [
+                'multiple' => true,
+                'tags' => false,
+                'noselectionstring' => get_string('choose...', 'mod_booking'),
+            ];
+            $mform->addElement(
+                'autocomplete',
+                'customfieldsforview',
+                get_string('customfieldsforviewinstance', 'mod_booking'),
+                $customfieldshortnames,
+                $options
+            );
+            $mform->addHelpButton('customfieldsforview', 'customfieldsforviewinstance', 'mod_booking');
+            $preset = (array)booking::get_value_of_json_by_key($bookingid, 'customfieldsforview') ?? [];
+            // Older instances stored shortname => fullname pairs instead of a plain list of shortnames.
+            $mform->setDefault('customfieldsforview', array_is_list($preset) ? $preset : array_keys($preset));
+            // As long as no customfields are selected on instance level, the global plugin setting applies.
+            $globalsettingurl = new moodle_url(
+                '/admin/settings.php',
+                ['section' => 'modsettingbooking'],
+                'admin-customfieldsforview'
+            );
+            $mform->addElement(
+                'static',
+                'customfieldsforviewglobalhint',
+                '',
+                get_string('customfieldsforview:globalhint', 'mod_booking', $globalsettingurl->out())
+            );
         }
+
+        // Columns to add to the full text search of the booking options table.
+        $fulltextsearchcolumnoptions = [
+            'description' => get_string('description', 'mod_booking'),
+            'location' => get_string('location', 'mod_booking'),
+            'institution' => get_string('institution', 'mod_booking'),
+            'identifier' => get_string('optionidentifier', 'mod_booking'),
+        ];
+        $fulltextsearchcolumnoptions = array_merge($fulltextsearchcolumnoptions, $customfieldshortnames);
+        $options = [
+            'multiple' => true,
+            'tags' => false,
+            'noselectionstring' => get_string('choose...', 'mod_booking'),
+        ];
+        $mform->addElement(
+            'autocomplete',
+            'fulltextsearchcolumns',
+            get_string('fulltextsearchcolumns', 'mod_booking'),
+            $fulltextsearchcolumnoptions,
+            $options
+        );
+        $mform->addHelpButton('fulltextsearchcolumns', 'fulltextsearchcolumns', 'mod_booking');
+        $mform->setDefault(
+            'fulltextsearchcolumns',
+            (array)booking::get_value_of_json_by_key($bookingid, 'fulltextsearchcolumns')
+        );
 
         // Fields for download of booking option overview.
         $options = [
@@ -684,7 +748,7 @@ class mod_booking_mod_form extends moodleform_mod {
         $defaults = array_keys($optionsdownloadfields);
         $mform->setDefault('optionsdownloadfields', $defaults);
 
-        // Fields on manage responses page.
+        // Fields on manage responses page and bookings tracker.
         $options = [
                         'multiple' => true,
                         'tags' => false,
@@ -1238,6 +1302,22 @@ class mod_booking_mod_form extends moodleform_mod {
             );
         }
 
+        // Connected Moodle course.
+        $mform->addElement(
+            'header',
+            'connectedmoodlecourseheader',
+            get_string('connectedmoodlecourse', 'mod_booking')
+        );
+
+        $mform->addElement('advcheckbox', 'autoenrol', get_string('autoenrol', 'mod_booking'));
+        $mform->setDefault('autoenrol', 1);
+        $mform->addHelpButton('autoenrol', 'autoenrol', 'mod_booking');
+
+        // Dependent on autoenrol, indented via styles.css.
+        $mform->addElement('advcheckbox', 'addtogroup', get_string('addtogroup', 'mod_booking'));
+        $mform->addHelpButton('addtogroup', 'addtogroup', 'mod_booking');
+        $mform->hideIf('addtogroup', 'autoenrol', 'notchecked');
+
         // Miscellaneous settings.
         $mform->addElement(
             'header',
@@ -1254,21 +1334,13 @@ class mod_booking_mod_form extends moodleform_mod {
         );
         $mform->setType('bookingpolicy', PARAM_CLEANHTML);
 
-        $mform->addElement('advcheckbox', 'autoenrol', get_string('autoenrol', 'mod_booking'));
-        $mform->setDefault('autoenrol', 1);
-        $mform->addHelpButton('autoenrol', 'autoenrol', 'mod_booking');
-
-        $mform->addElement('advcheckbox', 'addtogroup', get_string('addtogroup', 'mod_booking'));
-        $mform->addHelpButton('addtogroup', 'addtogroup', 'mod_booking');
-        $mform->hideIf('addtogroup', 'autoenrol', 'notchecked');
-
         $groupoptions = [
             MOD_BOOKING_ENROL_INTO_GROUP_OF_BOOKINGOPTION => get_string('addtogroupofcurrentcoursebookingoption', 'mod_booking'),
         ];
         $groups = groups_get_all_groups($COURSE->id);
         foreach ($groups as $id => $groupdata) {
             $groupoptions[$id] = $groupdata->name;
-        };
+        }
         $enroltogroupselect = $mform->addElement(
             'select',
             'addtogroupofcurrentcourse',
@@ -1281,6 +1353,7 @@ class mod_booking_mod_form extends moodleform_mod {
             'addtogroupofcurrentcourse',
             booking::get_value_of_json_by_key($bookingid, 'addtogroupofcurrentcourse') ?? []
         );
+
         $mform->addElement(
             'advcheckbox',
             'unenrolfromgroupofcurrentcourse',
@@ -1463,6 +1536,103 @@ class mod_booking_mod_form extends moodleform_mod {
         $mform->addHelpButton('toporientation', 'signinsheettoporientationdesc', 'mod_booking');
         $mform->setDefault('toporientation', 'L');
         $mform->setType('toporientation', PARAM_ALPHA);
+
+        // Default settings for the sign-in sheet download of this instance.
+        // They are used unless a booking option has its own settings persisted
+        // (via the sign-in sheet modal in the Bookings Tracker).
+        $signinsheetdefaults = signinsheet_config::defaults();
+        $instancesigninconfig = (array)(booking::get_value_of_json_by_key($bookingid, signinsheet_config::JSONKEY) ?? []);
+        $signinsheetdefaults = array_intersect_key($instancesigninconfig, $signinsheetdefaults) + $signinsheetdefaults;
+        // Instances without stored settings use the plugin config (checkbox checked).
+        $usepluginconfigdefault = empty($instancesigninconfig) ? 1 : (int)!empty($instancesigninconfig['usepluginconfig']);
+        $signinhtmlmode = signinsheet_config::is_htmlmode();
+
+        $signinsettingsurl = new moodle_url('/admin/settings.php', ['section' => 'modsettingbooking']);
+        $mform->addElement(
+            'advcheckbox',
+            'signinsheetusepluginconfig',
+            get_string('signinsheetusepluginconfig', 'mod_booking', $signinsettingsurl->out())
+        );
+        $mform->setDefault('signinsheetusepluginconfig', $usepluginconfigdefault);
+
+        $mform->addElement('select', 'signinsheetorientation', get_string('pdforientation', 'mod_booking'), [
+            'P' => get_string('pdfportrait', 'mod_booking'),
+            'L' => get_string('pdflandscape', 'mod_booking'),
+        ]);
+        $mform->setDefault('signinsheetorientation', $signinsheetdefaults['orientation']);
+        $mform->hideIf('signinsheetorientation', 'signinsheetusepluginconfig', 'checked');
+
+        $mform->addElement('select', 'signinsheetorderby', get_string('sortby', 'mod_booking'), [
+            'lastname' => get_string('sortbylastname', 'grades'),
+            'firstname' => get_string('sortbyfirstname', 'grades'),
+        ]);
+        $mform->setDefault('signinsheetorderby', $signinsheetdefaults['orderby']);
+        $mform->hideIf('signinsheetorderby', 'signinsheetusepluginconfig', 'checked');
+
+        // The empty rows setting is only applied in the classic (PDF) mode.
+        if (!$signinhtmlmode) {
+            $emptyrowsoptions = array_combine(range(0, 10), range(0, 10)) + [20 => 20, 40 => 40, 80 => 80];
+            $mform->addElement(
+                'select',
+                'signinsheetaddemptyrows',
+                get_string('signinaddemptyrows', 'mod_booking'),
+                $emptyrowsoptions
+            );
+            $mform->setDefault('signinsheetaddemptyrows', $signinsheetdefaults['addemptyrows']);
+            $mform->hideIf('signinsheetaddemptyrows', 'signinsheetusepluginconfig', 'checked');
+        }
+
+        $mform->addElement('select', 'signinsheetpdftitle', get_string('choosepdftitle', 'mod_booking'), [
+            1 => get_string('pdftitleinstanceoption', 'mod_booking'),
+            2 => get_string('pdftitleoption', 'mod_booking'),
+            3 => get_string('pdftitleinstance', 'mod_booking'),
+        ]);
+        $mform->setDefault('signinsheetpdftitle', $signinsheetdefaults['pdftitle']);
+        $mform->hideIf('signinsheetpdftitle', 'signinsheetusepluginconfig', 'checked');
+
+        $signinpdfsessionsdefault = (int)$signinsheetdefaults['pdfsessions'];
+        if ($signinhtmlmode && $signinpdfsessionsdefault === -1) {
+            // The choice "Add date manually" has no effect in HTML template mode and is not offered there.
+            $signinpdfsessionsdefault = -2;
+        }
+        $mform->addElement(
+            'select',
+            'signinsheetpdfsessions',
+            get_string('signinonesession', 'mod_booking'),
+            signinsheet_config::pdfsessions_choices()
+        );
+        $mform->setDefault('signinsheetpdfsessions', $signinpdfsessionsdefault);
+        $mform->hideIf('signinsheetpdfsessions', 'signinsheetusepluginconfig', 'checked');
+
+        $mform->addElement(
+            'advcheckbox',
+            'signinsheetincludeteachers',
+            get_string('includeteachers', 'mod_booking')
+        );
+        $mform->setDefault('signinsheetincludeteachers', $signinsheetdefaults['includeteachers']);
+        $mform->hideIf('signinsheetincludeteachers', 'signinsheetusepluginconfig', 'checked');
+
+        $mform->addElement(
+            'select',
+            'signinsheetextrasessioncols',
+            get_string('signinextrasessioncols', 'mod_booking'),
+            [
+                -1 => get_string('none'),
+                0 => get_string('all'),
+            ]
+        );
+        $mform->setDefault('signinsheetextrasessioncols', $signinsheetdefaults['signinextrasessioncols']);
+        $mform->hideIf('signinsheetextrasessioncols', 'signinsheetusepluginconfig', 'checked');
+
+        // The save-as format is only applied in HTML template mode.
+        if ($signinhtmlmode) {
+            $mform->addElement('select', 'signinsheetsaveasformat', get_string('signinformat', 'mod_booking'), [
+                'pdf' => 'PDF',
+                'word' => 'Word',
+            ]);
+            $mform->setDefault('signinsheetsaveasformat', $signinsheetdefaults['saveasformat']);
+            $mform->hideIf('signinsheetsaveasformat', 'signinsheetusepluginconfig', 'checked');
+        }
 
         // Teachers.
         $mform->addElement(

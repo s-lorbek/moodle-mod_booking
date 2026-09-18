@@ -313,11 +313,11 @@ class dates {
             }
 
             // Also make sure, we delete all previous calendar events.
-            // Delete course events for the optiondate.
+            // Delete course and site events for the optiondate.
             // Optionid and optiondateid are stored in uuid column like this: optionid-optiondateid.
             $DB->delete_records_select(
                 'event',
-                "eventtype = 'course'
+                "eventtype IN ('course', 'site')
                 AND courseid <> 0
                 AND component = 'mod_booking'
                 AND uuid LIKE :pattern",
@@ -502,6 +502,20 @@ class dates {
         $dates = [];
         $highestindex = 1;
 
+        // CSV/webservice imports may deliver indexed date rows (coursestarttime_<n>) without
+        // the matching optiondateid_<n> marker the parser below is keyed on — the documented
+        // import columns would then be dropped silently. Inject the marker (0 = new date) for
+        // import inputs only: the interactive form always submits its own optiondateid keys,
+        // and injecting there could resurrect a date the user just deleted.
+        if (!empty($formvalues['importing'])) {
+            foreach (preg_grep('/^coursestarttime_\d+$/', array_keys($formvalues)) as $key) {
+                $idkey = MOD_BOOKING_FORM_OPTIONDATEID . substr($key, strlen(MOD_BOOKING_FORM_COURSESTARTTIME));
+                if (!isset($formvalues[$idkey])) {
+                    $formvalues[$idkey] = 0;
+                }
+            }
+        }
+
         if (!$optiondates = preg_grep('/^optiondateid_/', array_keys($formvalues))) {
             // For performance.
 
@@ -554,6 +568,16 @@ class dates {
                 } else {
                     $coursestarttime = $formvalues[MOD_BOOKING_FORM_COURSESTARTTIME . $counter];
                     $courseendtime = $formvalues[MOD_BOOKING_FORM_COURSEENDTIME . $counter];
+
+                    if (!empty($formvalues['importing'])) {
+                        // A date slot is either a datestring (importer format) or nothing - skip empties.
+                        if (empty($coursestarttime) && empty($courseendtime)) {
+                            continue;
+                        }
+                        $dateparseformat = $formvalues['dateparseformat'] ?? '';
+                        $coursestarttime = self::parse_date_with_format($coursestarttime, $dateparseformat);
+                        $courseendtime = self::parse_date_with_format($courseendtime, $dateparseformat);
+                    }
                 }
 
                 // We might have entitites added.
@@ -1024,6 +1048,10 @@ class dates {
      * @return int Unix timestamp
      */
     private static function parse_date_with_format($datestring, $dateparseformat) {
+        // Numeric values are already unix timestamps and must be passed through unchanged.
+        if (is_numeric($datestring)) {
+            return (int) $datestring;
+        }
         // If we have a custom date format from CSV import, use it.
         if (!empty($dateparseformat)) {
             $date = DateTime::createFromFormat($dateparseformat, $datestring);

@@ -26,18 +26,15 @@ declare(strict_types=1);
 
 namespace mod_booking\external;
 
-use external_api;
-use external_function_parameters;
-use external_single_structure;
-use external_value;
-use external_warnings;
+use core_external\external_api;
+use core_external\external_function_parameters;
+use core_external\external_single_structure;
+use core_external\external_value;
+use core_external\external_warnings;
 use mod_booking\booking_option;
 use mod_booking\output\bookingoption_description;
+use mod_booking\permissions;
 use mod_booking\singleton_service;
-
-defined('MOODLE_INTERNAL') || die();
-
-require_once($CFG->libdir . '/externallib.php');
 
 /**
  * External Service for get booking option description.
@@ -74,6 +71,14 @@ class get_booking_option_description extends external_api {
             self::execute_parameters(),
             ['optionid' => $optionid, 'userid' => $userid]
         );
+
+        // The user needs access to the booking instance the option belongs to.
+        // Users with mod/booking:choose may see the description without course access (e.g. via shortcode lists).
+        $settings = singleton_service::get_instance_of_booking_option_settings($params['optionid']);
+        permissions::validate_context_for_booking((int)($settings->cmid ?? 0));
+        // Requesting the description rendered for another user (incl. their booking
+        // status) needs the book for others (or cashier) rights.
+        \mod_booking\form\condition\customform_form::require_userid_access($params['userid'], $params['optionid']);
 
         $booking = singleton_service::get_instance_of_booking_by_optionid($optionid);
 

@@ -26,7 +26,6 @@ declare(strict_types=1);
 
 namespace mod_booking\external;
 
-use context_module;
 use context_system;
 use core_external\external_api;
 use core_external\external_function_parameters;
@@ -35,6 +34,7 @@ use core_external\external_value;
 use mod_booking\local\mobile\slotbookingstore;
 use mod_booking\local\slotbooking\slot_availability;
 use mod_booking\local\slotbooking\slot_price;
+use mod_booking\permissions;
 use mod_booking\singleton_service;
 
 /**
@@ -50,10 +50,13 @@ class save_slot_selection extends external_api {
         return new external_function_parameters([
             'optionid' => new external_value(PARAM_INT, 'booking option id'),
             'userid' => new external_value(PARAM_INT, 'user id', VALUE_DEFAULT, 0),
-            'selection' => new external_value(PARAM_RAW, 'JSON encoded list of slot keys ("start:end")'),
+            'selection' => new external_value(
+                PARAM_RAW,
+                'JSON list of slot keys ("start:end"); keys are cast to int timestamps server-side'
+            ),
             'teacherselection' => new external_value(
                 PARAM_RAW,
-                'JSON encoded map of slot key to teacher id list',
+                'JSON encoded map of slot key to teacher id list; all ids are cast to int server-side',
                 VALUE_DEFAULT,
                 '{}'
             ),
@@ -83,8 +86,11 @@ class save_slot_selection extends external_api {
         $userid = $params['userid'] ?: (int)$USER->id;
 
         $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
-        self::validate_context(context_module::instance($settings->cmid));
+        // Users with mod/booking:choose may use the slot picker without course access (e.g. via shortcode lists).
+        permissions::validate_context_for_booking((int)($settings->cmid ?? 0));
         require_capability('mod/booking:conditionforms', context_system::instance());
+        // Validating and caching a selection for another user needs the book for others (or cashier) rights.
+        \mod_booking\form\condition\customform_form::require_userid_access($userid, $optionid);
 
         $keys = self::normalise_keys($params['selection']);
         $teachermap = json_decode($params['teacherselection'], true);
@@ -103,6 +109,24 @@ class save_slot_selection extends external_api {
         if (count($keys) > $maxslots) {
             $errors['slot_selection'] = get_string('slot_error_selection_toomany', 'mod_booking');
         }
+
+        $parsedranges = [];
+        foreach ($keys as $key) {
+            [$start, $end] = array_map('intval', array_pad(explode(':', $key, 2), 2, 0));
+            if ($end > $start) {
+                $parsedranges[] = [$start, $end];
+            }
+        }
+        if (slot_availability::ranges_overlap_internally($parsedranges)) {
+            $errors['slot_selection'] = get_string('slot_error_selection_overlap', 'mod_booking');
+        }
+
+        // A selection can already be (part of) the user's own persisted answer(s) - e.g. this
+        // webservice also re-validates the cached selection once on load, and "book again"
+        // (multiplebookings) can leave more than one active answer for this option. Without
+        // excluding all of them, a slot the user already holds is counted as an occupant against
+        // itself and wrongly reported as unavailable.
+        $ownanswerids = slot_availability::get_active_answer_ids_for_user($optionid, $userid);
 
         foreach ($keys as $key) {
             [$start, $end] = array_map('intval', array_pad(explode(':', $key, 2), 2, 0));
@@ -124,7 +148,14 @@ class save_slot_selection extends external_api {
                 $normalizedteachers[$key] = $selectedteachers;
             }
 
-            $evaluation = slot_availability::evaluate_slot_for_user($optionid, $start, $end, $userid, $selectedteachers);
+            $evaluation = slot_availability::evaluate_slot_for_user(
+                $optionid,
+                $start,
+                $end,
+                $userid,
+                $selectedteachers,
+                excludeanswerids: $ownanswerids
+            );
             if (empty($evaluation['bookable'])) {
                 $errors['slot_selection'] = get_string('slot_error_selected_unavailable', 'mod_booking');
                 continue;

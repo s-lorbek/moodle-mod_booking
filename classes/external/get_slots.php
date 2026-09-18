@@ -26,13 +26,13 @@ declare(strict_types=1);
 
 namespace mod_booking\external;
 
-use context_module;
 use context_system;
 use core_external\external_api;
 use core_external\external_function_parameters;
 use core_external\external_single_structure;
 use core_external\external_value;
 use mod_booking\local\slotbooking\slot_dto;
+use mod_booking\permissions;
 use mod_booking\singleton_service;
 
 /**
@@ -69,8 +69,11 @@ class get_slots extends external_api {
         $userid = $params['userid'] ?: (int)$USER->id;
 
         $settings = singleton_service::get_instance_of_booking_option_settings($params['optionid']);
-        self::validate_context(context_module::instance($settings->cmid));
+        // Users with mod/booking:choose may use the slot picker without course access (e.g. via shortcode lists).
+        permissions::validate_context_for_booking((int)($settings->cmid ?? 0));
         require_capability('mod/booking:conditionforms', context_system::instance());
+        // Reading the picker state of another user needs the book for others (or cashier) rights.
+        \mod_booking\form\condition\customform_form::require_userid_access($userid, $params['optionid']);
 
         return [
             'slots' => json_encode(slot_dto::build_picker_slots($params['optionid'], $userid)),

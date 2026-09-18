@@ -29,16 +29,12 @@ namespace mod_booking\external;
 use context_module;
 use context_system;
 use core\exception\moodle_exception;
-use external_api;
-use external_function_parameters;
-use external_single_structure;
-use external_value;
+use core_external\external_api;
+use core_external\external_function_parameters;
+use core_external\external_single_structure;
+use core_external\external_value;
 use mod_booking\singleton_service;
 use mod_booking\utils\webservice_import;
-
-defined('MOODLE_INTERNAL') || die();
-
-require_once($CFG->libdir . '/externallib.php');
 
 /**
  * External Service to create a booking option.
@@ -58,13 +54,13 @@ class addbookingoption extends external_api {
         return new external_function_parameters([
             'name' => new external_value(PARAM_TEXT, 'Booking option name', VALUE_REQUIRED),
             'identifier' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Unique identifier for booking option',
                 VALUE_DEFAULT,
                 ''
             ),
             'titleprefix' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Optional prefix to be shown before title',
                 VALUE_DEFAULT,
                 ''
@@ -88,7 +84,7 @@ class addbookingoption extends external_api {
                 0
             ),
             'bookingidnumber' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Idnumber identifier of target booking activity.',
                 VALUE_DEFAULT,
                 ''
@@ -100,19 +96,19 @@ class addbookingoption extends external_api {
                 0
             ),
             'courseidnumber' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Idnumber identifier of target course. Overriden by bookingidnumber.',
                 VALUE_DEFAULT,
                 ''
             ),
             'courseshortname' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Shortname of target course. Overriden by bookingidnumber.',
                 VALUE_DEFAULT,
                 ''
             ),
             'enroltocourseshortname' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Shortname of course users will be enrolled to.',
                 VALUE_DEFAULT,
                 ''
@@ -136,13 +132,13 @@ class addbookingoption extends external_api {
                 0
             ),
             'bookingopeningtime' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Time until when booking is not yet possible.',
                 VALUE_DEFAULT,
                 ''
             ),
             'bookingclosingtime' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Time when booking is not possible anymore.',
                 VALUE_DEFAULT,
                 ''
@@ -155,7 +151,7 @@ class addbookingoption extends external_api {
             ),
             'description' => new external_value(
                 PARAM_RAW,
-                'Description',
+                'Description; may contain HTML, cleaned on display via format_text.',
                 VALUE_DEFAULT,
                 ''
             ),
@@ -173,7 +169,8 @@ class addbookingoption extends external_api {
             ),
             'addtocalendar' => new external_value(
                 PARAM_INT,
-                'To add to calendar set to 1, else 0.',
+                'Add to Moodle calendar: 0 = do not add, 1 = course event, 2 = site event ' .
+                    '(2 requires the capability mod/booking:createcalendarsiteevents).',
                 VALUE_DEFAULT,
                 0
             ),
@@ -184,19 +181,19 @@ class addbookingoption extends external_api {
                 ''
             ),
             'location' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Location',
                 VALUE_DEFAULT,
                 ''
             ),
             'institution' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Institution',
                 VALUE_DEFAULT,
                 ''
             ),
             'address' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Address',
                 VALUE_DEFAULT,
                 ''
@@ -239,19 +236,19 @@ class addbookingoption extends external_api {
             ),
             'beforebookedtext' => new external_value(
                 PARAM_RAW,
-                'Before booked text',
+                'Text shown before booking; may contain HTML, cleaned on display.',
                 VALUE_DEFAULT,
                 ''
             ),
             'beforecompletedtext' => new external_value(
                 PARAM_RAW,
-                'Text to show before completion.',
+                'Text to show before completion; may contain HTML, cleaned on display.',
                 VALUE_DEFAULT,
                 ''
             ),
             'aftercompletedtext' => new external_value(
                 PARAM_RAW,
-                'Text to show after completion.',
+                'Text to show after completion; may contain HTML, cleaned on display.',
                 VALUE_DEFAULT,
                 ''
             ),
@@ -280,7 +277,7 @@ class addbookingoption extends external_api {
                 ''
             ),
             'user_username' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Username of user to inscribe. User must exist in system.',
                 VALUE_DEFAULT,
                 ''
@@ -304,25 +301,25 @@ class addbookingoption extends external_api {
                 0
             ),
             'responsiblecontact' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Responsible contact as e-mail. Only one possible.',
                 VALUE_DEFAULT,
                 ''
             ),
             'boavenrolledincourse' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Booking Condition enrolled courses with shortnames, comma separated',
                 VALUE_DEFAULT,
                 ''
             ),
             'boavenrolledincohorts' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'Booking Condition enrolled cohorts with shortnames, comma separated',
                 VALUE_DEFAULT,
                 ''
             ),
             'recommendedin' => new external_value(
-                PARAM_RAW,
+                PARAM_TEXT,
                 'This is for the recommendedin-feature and takes the shortnames of the courses, separated by commas.',
                 VALUE_DEFAULT,
                 ''
@@ -446,12 +443,18 @@ class addbookingoption extends external_api {
             $settings = singleton_service::get_instance_of_booking_option_settings($bookingoptionid);
             $cmid = $settings->cmid ?? 0;
             if ($cmid) {
-                $hascapability = has_capability('mod/booking:updatebooking', context_module::instance($cmid));
+                $checkcontext = context_module::instance($cmid);
+                self::validate_context($checkcontext);
+                $hascapability = has_capability('mod/booking:updatebooking', $checkcontext);
             }
         } else if (!empty($bookingcmid)) {
-            $hascapability = has_capability('mod/booking:updatebooking', context_module::instance($bookingcmid));
+            $checkcontext = context_module::instance($bookingcmid);
+            self::validate_context($checkcontext);
+            $hascapability = has_capability('mod/booking:updatebooking', $checkcontext);
         } else {
-            $hascapability = has_capability('mod/booking:updatebooking', context_system::instance());
+            $checkcontext = context_system::instance();
+            self::validate_context($checkcontext);
+            $hascapability = has_capability('mod/booking:updatebooking', $checkcontext);
         }
         if (!$hascapability) {
             throw new moodle_exception('nopermissions', 'error');

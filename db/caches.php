@@ -67,6 +67,12 @@ $definitions = [
         'staticaccelerationsize' => 100,
         'invalidationevents' => ['setbackoptionstable', 'setbackencodedtables'],
     ],
+    'sqlfilterrelevance' => [ // Site-wide set of values referenced by sqlfilter availability conditions.
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'staticacceleration' => true,
+        'staticaccelerationsize' => 1,
+    ],
     'mybookingoptionstable' => [ // This cache uses hashed sql queries as keys. We destroy it when a user has booked.
         'mode' => cache_store::MODE_SESSION,
         'simplekeys' => true,
@@ -175,12 +181,6 @@ $definitions = [
         'staticacceleration' => true,
         'staticaccelerationsize' => 1,
         'invalidationevents' => ['setbackbookinghistorytable'],
-    ],
-    'bookforuser' => [
-        'mode' => cache_store::MODE_SESSION,
-        'simplekeys' => true,
-        'staticacceleration' => true,
-        'staticaccelerationsize' => 10,
     ],
     'usercompetenciescache' => [
         'mode' => cache_store::MODE_APPLICATION,

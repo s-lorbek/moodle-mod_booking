@@ -49,6 +49,7 @@ Feature: Create booking action as admin and ensure they are working as student a
     And I click on "Edit booking option" "icon" in the ".allbookingoptionstable_r1" "css_element"
     ##And I follow "Actions after booking [EXPERIMENTAL]"
     And I expand all fieldsets
+    And I wait until ".collapsing" "css_element" does not exist
     And I click on "Add action" "text"
     And I wait "1" seconds
     And I set the following fields to these values:
@@ -60,6 +61,7 @@ Feature: Create booking action as admin and ensure they are working as student a
     And I wait "2" seconds
     ##And I follow "Actions after booking [EXPERIMENTAL]"
     And I expand all fieldsets
+    And I wait until ".collapsing" "css_element" does not exist
     And I should see "Book more options" in the ".booking-actions-list" "css_element"
     And I click on "Edit" "text" in the ".booking-actions-list" "css_element"
     And I wait "1" seconds
@@ -68,6 +70,7 @@ Feature: Create booking action as admin and ensure they are working as student a
     And I wait "2" seconds
     ##And I follow "Actions after booking [EXPERIMENTAL]"
     And I expand all fieldsets
+    And I wait until ".collapsing" "css_element" does not exist
     And I should see "Book other options" in the ".booking-actions-list" "css_element"
     And I log out
 
@@ -98,19 +101,17 @@ Feature: Create booking action as admin and ensure they are working as student a
     ## Validate general booking history
     And I log in as "admin"
     And I visit "/mod/booking/report2.php"
-    And I should see "B1-Option1" in the "#booked_system_0_r1" "css_element"
-    And I should see "1/5" in the "#booked_system_0_r1" "css_element"
-    And I should see "B1-Option2" in the "#booked_system_0_r2" "css_element"
-    And I should see "1/2" in the "#booked_system_0_r2" "css_element"
-    And I should see "B2-Option1" in the "#booked_system_0_r3" "css_element"
-    And I should see "1/1" in the "#booked_system_0_r3" "css_element"
-    And I should see "B2-Option2" in the "#booked_system_0_r4" "css_element"
-    And I should see "0/2" in the "#booked_system_0_r4" "css_element"
+    ## Rows are matched by content because rows created within the same second
+    ## have no deterministic order across the supported databases.
+    And I should see "1/1" in the "//tr[starts-with(@id, 'booked_system_0_r') and contains(., 'B2-Option1')]" "xpath_element"
+    And I should see "1/2" in the "//tr[starts-with(@id, 'booked_system_0_r') and contains(., 'B1-Option2')]" "xpath_element"
+    And I should see "1/5" in the "//tr[starts-with(@id, 'booked_system_0_r') and contains(., 'B1-Option1')]" "xpath_element"
+    And I should see "0/2" in the "//tr[starts-with(@id, 'booked_system_0_r') and contains(., 'B2-Option2')]" "xpath_element"
     And I click on "Booking history" "text" in the "#accordion-heading-bookinghistory" "css_element"
     And I wait until the page is ready
-    And I should see "student1@example.com" in the "#bookinghistorytable_system_0_r1" "css_element"
-    And I should see "student1@example.com" in the "#bookinghistorytable_system_0_r2" "css_element"
-    And I should see "student1@example.com" in the "#bookinghistorytable_system_0_r3" "css_element"
+    And I should see "student1@example.com" in the "//tr[starts-with(@id, 'bookinghistorytable_system_0_r') and contains(., 'B1-Option1')]" "xpath_element"
+    And I should see "student1@example.com" in the "//tr[starts-with(@id, 'bookinghistorytable_system_0_r') and contains(., 'B1-Option2')]" "xpath_element"
+    And I should see "student1@example.com" in the "//tr[starts-with(@id, 'bookinghistorytable_system_0_r') and contains(., 'B2-Option1')]" "xpath_element"
     And I log out
 
   @javascript

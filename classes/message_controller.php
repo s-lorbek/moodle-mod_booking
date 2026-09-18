@@ -290,7 +290,7 @@ class message_controller {
         // It's used as string param {$a->sessionreminder} in the default message string 'sessionremindermailmessage'.
         if ($this->messageparam == MOD_BOOKING_MSGPARAM_SESSIONREMINDER) {
             // Rendered session description.
-            $this->stringparams->sessiondescription = get_rendered_eventdescription(
+            $this->stringparams->sessiondescription = booking_get_rendered_eventdescription(
                 $this->optionid,
                 $this->cmid,
                 MOD_BOOKING_DESCRIPTION_CALENDAR
@@ -676,8 +676,12 @@ class message_controller {
                     && empty($settings->selflearningcourse) // No icals for selflearningcourses!
                 ) {
                     // If message contains attachment (ics file), we need to mail it using PHPMailer
-                    // as Moodle core can not send messages with mime type text/calendar. This logic works
-                    // only when there is 1 date, so in the case we have more than one date, we don't use this logic.
+                    // as Moodle core can not send messages with mime type text/calendar. The ics is
+                    // sent as inline calendar data so that Outlook shows the accept/decline buttons.
+                    // This only works for a meeting request or cancellation with ONE single event
+                    // (METHOD:REQUEST / METHOD:CANCEL, see ical::get_method()). Options with several
+                    // dates get a METHOD:PUBLISH ical without accept/decline anyway, so we don't use
+                    // this logic for them and send them like every other message.
                     $sent = $this->send_message_with_ical($this->messagedata);
                 } else {
                     // In all other cases, use message_send.
@@ -847,6 +851,27 @@ class message_controller {
     public function set_custom_attachment(string $filepath, string $filename): void {
         $this->customattachment = $filepath;
         $this->customattachmentname = $filename;
+    }
+
+    /**
+     * Override the sender of this message, replacing the default sender (booking manager).
+     * Has to be called after construction, as the message data is built in the constructor.
+     *
+     * @param stdClass $user the user to be used as sender
+     * @return void
+     */
+    public function set_sender(stdClass $user): void {
+        if (!empty($this->messagedata)) {
+            $this->messagedata->userfrom = $user;
+            // Unless the sender's domain is listed in $CFG->allowedemaildomains, core
+            // email_to_user() replaces both the visible from address AND the implicit
+            // reply-to with the noreply address. Set an explicit reply-to so recipients
+            // can always answer the resolved sender directly.
+            if (!empty($user->email) && \core_user::is_real_user($user->id ?? 0)) {
+                $this->messagedata->replyto = $user->email;
+                $this->messagedata->replytoname = fullname($user);
+            }
+        }
     }
 
     /**

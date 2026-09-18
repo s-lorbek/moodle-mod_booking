@@ -25,6 +25,7 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+use mod_booking\customfield\booking_handler;
 use mod_booking\output\business_card;
 use mod_booking\output\view;
 use mod_booking\local\htmlcomponents;
@@ -115,6 +116,10 @@ $output = $PAGE->get_renderer('mod_booking');
 
 echo $OUTPUT->header();
 
+// Show a clear message if the instance references customfields that are missing on this
+// platform, e.g. after restoring a course backup from another Moodle site.
+echo booking_handler::create()->check_for_missing_customfields_and_return_warning($bookingsettings, $context);
+
 // If we have specified a teacher as organizer, we show a "busines_card" with photo, else legacy organizer description.
  $organizerhtml = '';
 if (
@@ -175,6 +180,9 @@ if (!empty($CFG->usetags)) {
 // Now we show the actual view.
 $view = new view($cmid, $whichview, $optionid);
 $classicview = $organizerhtml . $output->render_view($view);
+$enginecomponent = \mod_booking\local\wizard\engine_component::active();
+$aireadyclass = \mod_booking\local\wizard\engine_component::aiready_class();
+
 $hasoptions = $booking->get_all_options_count() > 0;
 $tabs = [
     [
@@ -184,6 +192,16 @@ $tabs = [
         'active' => $hasoptions,
     ],
 ];
+
+if (!empty($aireadyclass)) {
+    $aitemplatedata = (new $aireadyclass((int)$context->id, $USER->id))->export_for_template();
+    $tabs[] = [
+        'title' => '<i class="fa fa-magic" aria-hidden="true"></i>',
+        'label' => get_string('aiinstructions', $enginecomponent),
+        'body' => $OUTPUT->render_from_template($enginecomponent . '/aiinstructions', $aitemplatedata),
+        'active' => !$hasoptions,
+    ];
+}
 
 echo htmlcomponents::render_bootstrap_earmarks($tabs, 'booking-view-tabs-' . $cmid);
 

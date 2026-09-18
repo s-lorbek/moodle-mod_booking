@@ -39,7 +39,7 @@ Feature: In a booking create a template
     And I follow "New booking option"
     And I set the field "Booking option name" to "Option template"
     And I follow "Dates"
-    And I set the field "Add to course calendar" to "Add to calendar (visible only to participants of moodle course)"
+    And I set the field "Add to Moodle calendar" to "Add to calendar (visible only to participants of moodle course)"
     And I press "Add date"
     And I wait "1" seconds
     And I set the following fields to these values:
@@ -121,6 +121,7 @@ Feature: In a booking create a template
     And I wait "1" seconds
     ## Validate self-learning options
     And I expand all fieldsets
+    And I wait until ".collapsing" "css_element" does not exist
     And the field "optiontype" matches value "Self-learning course"
     And the field "duration[number]" matches value "10"
     And the field "duration[timeunit]" matches value "seconds"

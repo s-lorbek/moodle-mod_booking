@@ -108,7 +108,7 @@ function booking_updatestartenddate($optionid) {
  * @param numeric $optiondateid the id of the option date for which the custom fields should be rendered
  * @return string the rendered HTML of the session's custom fields
  */
-function get_rendered_customfields($optiondateid) {
+function booking_get_rendered_customfields($optiondateid) {
     global $DB;
     $customfieldshtml = ''; // The rendered HTML.
     if ($customfields = $DB->get_records("booking_customfields", ["optiondateid" => $optiondateid])) {
@@ -129,7 +129,7 @@ function get_rendered_customfields($optiondateid) {
  * @param bool $forbookeduser
  * @return string The rendered HTML of the full description.
  */
-function get_rendered_eventdescription(
+function booking_get_rendered_eventdescription(
     int $optionid,
     int $cmid,
     int $descriptionparam = MOD_BOOKING_DESCRIPTION_WEBSITE,
@@ -169,7 +169,7 @@ function get_rendered_eventdescription(
  * @return void
  *
  */
-function optiondate_duplicatecustomfields($oldoptiondateid, $newoptiondateid) {
+function booking_optiondate_duplicatecustomfields($oldoptiondateid, $newoptiondateid) {
     global $DB;
     // Duplicate all custom fields which belong to this optiondate.
     $customfields = $DB->get_records("booking_customfields", ['optiondateid' => $oldoptiondateid]);
@@ -199,4 +199,33 @@ function booking_getoptionstatus($starttime = 0, $endtime = 0) {
     }
 
     return "";
+}
+
+/**
+ * Extract the ids of the selected users from submitted report form data.
+ *
+ * The user checkboxes of the report form are submitted as user[][<userid>],
+ * a nested array structure which optional_param_array() cannot process.
+ * So this function takes the raw submitted data (as returned by the
+ * data_submitted() API) and cleans every single user id with clean_param().
+ *
+ * @param stdClass|false|null $submitteddata the return value of data_submitted()
+ * @return int[] the cleaned ids of the selected users
+ */
+function booking_get_selected_userids($submitteddata): array {
+    $userids = [];
+    if (empty($submitteddata->user) || !is_array($submitteddata->user)) {
+        return $userids;
+    }
+    foreach ($submitteddata->user as $checkbox) {
+        $checkbox = (array) $checkbox;
+        if (empty($checkbox)) {
+            continue;
+        }
+        $userid = clean_param(array_key_first($checkbox), PARAM_INT);
+        if ($userid > 0) {
+            $userids[] = $userid;
+        }
+    }
+    return $userids;
 }

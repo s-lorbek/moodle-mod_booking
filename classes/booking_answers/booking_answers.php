@@ -635,7 +635,10 @@ class booking_answers {
         $maxoverbooking = $this->bookingoptionsettings->maxoverbooking ?? 0;
         if ($maxoverbooking > 0) {
             $returnarray['maxoverbooking'] = $maxoverbooking;
-            $returnarray['freeonwaitinglist'] = $maxoverbooking - $returnarray['waiting'];
+            // Clamp to 0: the waiting list can be over-full (e.g. maxoverbooking was reduced while users
+            // stayed on the list). A negative value must never leak out, because -1 is reserved as the
+            // "unlimited waiting list" sentinel and other negative values would pass empty()-style checks.
+            $returnarray['freeonwaitinglist'] = max(0, $maxoverbooking - $returnarray['waiting']);
         } else if ($maxoverbooking == -1) {
             $returnarray['freeonwaitinglist'] = -1;
         }
@@ -1060,6 +1063,33 @@ class booking_answers {
     }
 
     /**
+     * Public read-only accessor for all of a user's answers across a booking instance.
+     *
+     * Thin wrapper over the cached {@see self::get_all_answers_for_user_cached()} so callers
+     * (e.g. the AI agent's read-only diagnosis skill) can obtain a user's cross-option booking
+     * history without issuing their own DB queries. Performance: backed by the same per-user
+     * / per-instance MUC cache used internally — it introduces no additional uncached query path.
+     *
+     * @param int $userid
+     * @param int $bookingid Restrict to one booking instance (0 = all instances).
+     * @param array $status MOD_BOOKING_STATUSPARAM_* values to include.
+     * @return array<int,\stdClass> Answer records as returned by the cached loader.
+     */
+    public function get_all_answers_for_user(
+        int $userid,
+        int $bookingid = 0,
+        array $status = [
+            MOD_BOOKING_STATUSPARAM_BOOKED,
+            MOD_BOOKING_STATUSPARAM_WAITINGLIST,
+            MOD_BOOKING_STATUSPARAM_RESERVED,
+            MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED,
+            MOD_BOOKING_STATUSPARAM_DELETED,
+        ]
+    ): array {
+        return $this->get_all_answers_for_user_cached($userid, $bookingid, $status);
+    }
+
+    /**
      * Helper function to add availability info texts for available places and waiting list.
      *
      * @param  array $bookinginformation reference to booking information array.
@@ -1344,7 +1374,7 @@ class booking_answers {
         bool $excludeselflearningcourses = false
     ) {
 
-        global $DB, $CFG;
+        global $DB, $CFG, $USER;
 
         $answers = [];
         $data = singleton_service::get_answers_for_user($userid, $bookingid);
@@ -1355,11 +1385,20 @@ class booking_answers {
         // This is important so we only get instance-specific cache!
         $cachekey = "myanswers$bookingid";
 
+        // The cache key does not contain the userid, so the session cache must only ever hold the
+        // answers of the user the session belongs to. When the answers of ANOTHER user are needed
+        // (eg. conditions like the max number of bookings checked while booking for somebody else),
+        // the cache is bypassed in both directions: neither read (it holds the session user's
+        // answers) nor written (it would poison the session user's subsequent checks). Repeated
+        // lookups within the request are still covered by the userid-keyed singleton above.
+        $usecache = (int)$userid === (int)$USER->id
+            && !get_config('booking', 'cacheturnoffforbookinganswers');
+
         try {
             // If we don't have the answers in the singleton, we look in the cache.
             if (empty($answers)) {
                 $cache = \cache::make('mod_booking', 'bookinganswers');
-                if (!get_config('booking', 'cacheturnoffforbookinganswers')) {
+                if ($usecache) {
                     $data = $cache->get($cachekey);
                 } else {
                     $data = false;
@@ -1397,7 +1436,7 @@ class booking_answers {
 
                 $answers = $data['answers'];
                 singleton_service::set_answers_for_user($userid, $bookingid, $data);
-                if (!get_config('booking', 'cacheturnoffforbookinganswers')) {
+                if ($usecache) {
                     $cache->set($cachekey, $data);
                 }
             }

@@ -30,6 +30,8 @@ use Exception;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\freezable_condition;
 use mod_booking\bo_availability\bo_info;
+use mod_booking\bo_availability\sqlfilter_form_support;
+use mod_booking\bo_availability\sqlfilter_relevance;
 use mod_booking\booking_option_settings;
 use mod_booking\singleton_service;
 use mod_booking\utils\wb_payment;
@@ -225,6 +227,10 @@ class enrolledincourse implements bo_condition, freezable_condition {
         // Get all courses where the user is enrolled.
         $usercourses = enrol_get_users_courses($userid);
         $usercourseids = array_keys($usercourses);
+        // Trim to the course ids any sqlfilter condition references site-wide:
+        // other ids can never match a configured condition, but they would make
+        // the SQL string (and with it the table cache key) unique per user.
+        $usercourseids = sqlfilter_relevance::trim_to_referenced($this->id, $usercourseids);
         $databasetype = $DB->get_dbfamily();
         $conditionid = $this->id;
 
@@ -232,7 +238,7 @@ class enrolledincourse implements bo_condition, freezable_condition {
             if ($databasetype == 'postgres') {
                 $where = "
                     (
-                        availability IS NOT NULL
+                        COALESCE(availability, '[]') IS NOT NULL
                         AND NOT EXISTS (
                             SELECT 1 FROM jsonb_array_elements(availability::jsonb) AS obj
                             WHERE (obj->>'id')::int = $conditionid
@@ -241,18 +247,22 @@ class enrolledincourse implements bo_condition, freezable_condition {
                     )";
             } else if (
                 $databasetype == 'mysql'
-                && db_is_at_least_mariadb_106_or_mysql_8()
+                && booking_db_is_at_least_mariadb_106_or_mysql_8()
             ) {
+                // MySQL: JSON_TABLE must not read the availability column of the outer derived table (s1) - as soon as
+                // MySQL merges that derived table into the outer query, such a reference fails with
+                // "Incorrect arguments to JSON_TABLE". So we read the base table {booking_options} instead.
                 $where = "
                     (
-                        availability IS NOT NULL
-                        AND NOT EXISTS (
-                            SELECT 1 FROM JSON_TABLE(availability, '$[*]' COLUMNS (
+                        COALESCE(availability, '[]') IS NOT NULL
+                        AND id NOT IN (
+                            SELECT bo_sf.id
+                            FROM {booking_options} bo_sf
+                            JOIN JSON_TABLE(bo_sf.availability, '$[*]' COLUMNS (
                                 id INT PATH '$.id',
                                 sqlfilter VARCHAR(10) PATH '$.sqlfilter'
-                            )) AS jt
-                            WHERE jt.id = $conditionid
-                            AND jt.sqlfilter = '1'
+                            )) AS jt ON jt.id = $conditionid
+                            WHERE jt.sqlfilter = '1'
                         )
                     )";
             } else {
@@ -272,7 +282,7 @@ class enrolledincourse implements bo_condition, freezable_condition {
             // Depending on the courseidsoperator check either if user is enrolled in all or at least one courses selected.
             // Default is AND - all courses must be met by user.
             $where = "
-            availability IS NOT NULL
+            COALESCE(availability, '[]') IS NOT NULL
             AND
             (
                 (
@@ -309,22 +319,26 @@ class enrolledincourse implements bo_condition, freezable_condition {
             return ['', '', '', $params, $where];
         } else if (
             $databasetype == 'mysql'
-            && db_is_at_least_mariadb_106_or_mysql_8()
+            && booking_db_is_at_least_mariadb_106_or_mysql_8()
         ) {
             $courseidstext = array_map(fn($id) => "'" . $id . "'", $usercourseids);
             $appendwhere = implode(', ', $courseidstext);
 
+            // MySQL: JSON_TABLE must not read the availability column of the outer derived table (s1) - as soon as
+            // MySQL merges that derived table into the outer query, such a reference fails with
+            // "Incorrect arguments to JSON_TABLE". So we read the base table {booking_options} instead.
             $where = "
-                availability IS NOT NULL
+                COALESCE(availability, '[]') IS NOT NULL
                 AND (
                         (
-                            NOT EXISTS (
-                                SELECT 1 FROM JSON_TABLE(availability, '$[*]' COLUMNS (
+                            id NOT IN (
+                                SELECT bo_sf.id
+                                FROM {booking_options} bo_sf
+                                JOIN JSON_TABLE(bo_sf.availability, '$[*]' COLUMNS (
                                     id INT PATH '$.id',
                                     sqlfilter VARCHAR(10) PATH '$.sqlfilter'
-                                )) AS jt
-                                WHERE jt.id = $conditionid
-                                AND jt.sqlfilter = '1'
+                                )) AS jt ON jt.id = $conditionid
+                                WHERE jt.sqlfilter = '1'
                             )
                         )
                     OR (
@@ -358,6 +372,18 @@ class enrolledincourse implements bo_condition, freezable_condition {
         }
 
         return ["", "", "", $params, ""];
+    }
+
+    /**
+     * Return the user values this condition references in the given availability
+     * entry. Used by the sqlfilter relevance service to trim the user data
+     * embedded into the filter SQL down to the site-wide relevant set.
+     *
+     * @param stdClass $entry availability json entry of this condition
+     * @return array referenced course ids
+     */
+    public static function sqlfilter_referenced_values(stdClass $entry): array {
+        return array_map('intval', (array) ($entry->courseids ?? []));
     }
 
     /**
@@ -430,6 +456,7 @@ class enrolledincourse implements bo_condition, freezable_condition {
             'bo_cond_enrolledincourse_courseids',
             'bo_cond_enrolledincourse_courseids_operator',
             'bo_cond_enrolledincourse_sqlfiltercheck',
+            'bo_cond_enrolledincourse_sqlfiltercheck_disablednote',
             'bo_cond_enrolledincourse_overrideconditioncheckbox',
             'bo_cond_enrolledincourse_overrideoperator',
             'bo_cond_enrolledincourse_overridecondition',
@@ -445,9 +472,6 @@ class enrolledincourse implements bo_condition, freezable_condition {
      */
     public function add_condition_to_mform(MoodleQuickForm &$mform, int $optionid = 0) {
         global $DB;
-        if (empty(get_config('booking', 'usesqlfilteravailability'))) {
-            return;
-        }
         // Check if PRO version is activated.
         if (wb_payment::pro_version_is_activated()) {
             $coursesarray = [];
@@ -508,6 +532,10 @@ class enrolledincourse implements bo_condition, freezable_condition {
                 get_string('sqlfiltercheckstring', 'mod_booking')
             );
             $mform->hideIf('bo_cond_enrolledincourse_sqlfiltercheck', 'bo_cond_enrolledincourse_restrict', 'notchecked');
+            $notename = sqlfilter_form_support::freeze_when_disabled($mform, 'bo_cond_enrolledincourse_sqlfiltercheck');
+            if ($notename !== null) {
+                $mform->hideIf($notename, 'bo_cond_enrolledincourse_restrict', 'notchecked');
+            }
 
             $mform->addElement(
                 'checkbox',

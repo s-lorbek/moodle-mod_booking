@@ -141,7 +141,7 @@ class rule_react_on_event implements booking_rule {
         ];
 
         // Get a list of all booking events.
-        $allevents = get_list_of_booking_events();
+        $allevents = booking_get_list_of_booking_events();
         foreach (core_plugin_manager::instance()->get_plugins_of_type('bookingextension') as $plugin) {
             $class = "\\bookingextension_{$plugin->name}\\{$plugin->name}";
             if (!class_exists($class)) {
@@ -346,7 +346,7 @@ class rule_react_on_event implements booking_rule {
         $ruledata = $jsonobject->ruledata;
 
         $data->rule_name = $jsonobject->name;
-        $data->ruleisactive = $record->isactive;
+        $data->ruleisactive = (int)($record->isactive ?? 0);
         $data->rule_react_on_event_event = $ruledata->boevent;
         $data->rule_react_on_event_condition = $ruledata->condition;
         $data->rule_react_on_event_after_completion = $ruledata->aftercompletion;

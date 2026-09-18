@@ -173,6 +173,18 @@ function getOptionidFromContainer(element) {
 }
 
 /**
+ * Checks if the given element lives inside an inline prepage area (instead of a modal).
+ *
+ * @param {HTMLElement} element
+ * @returns {boolean}
+ */
+export function isInlineContainer(element) {
+    const container = element.closest('[id^="' + SELECTORS.MODALID + '"], [id^="' + SELECTORS.INLINEID + '"]');
+
+    return !!container && container.id.startsWith(SELECTORS.INLINEID);
+}
+
+/**
  * Optional shopping cart re-init for actions that may redirect or close views.
  * @param {boolean} shoppingcartisinstalled
  */
@@ -224,6 +236,13 @@ function registerDelegatedFooterListeners() {
         const optionid = getOptionidFromContainer(modal);
         if (optionid !== null) {
             setBackModalVariables(optionid);
+
+            // The cart may have changed while the modal was open (the item is added when
+            // the checkout prepage loads). Refresh the cart display no matter HOW the
+            // modal is closed (footer button, ESC, backdrop click) - the closemodal
+            // button is not the only way out of the modal.
+            const config = footerbuttonconfig[optionid] ?? {};
+            runShoppingCartPreActions(!!config.shoppingcartisinstalled);
         }
     });
 
@@ -277,14 +296,17 @@ function registerDelegatedFooterListeners() {
                 }
                 break;
             case 'closemodal':
-                reloadOnBookingView();
-                dispatchSlotbookingRefresh(optionid);
-                closeModal(optionid);
-                break;
             case 'closeinline':
                 reloadOnBookingView();
                 dispatchSlotbookingRefresh(optionid);
-                closeInline(optionid);
+                // The action name is decided server-side, where the rendered view is not always
+                // known (e.g. a shortcode list of a booking instance configured to use cards).
+                // What counts is the container the button actually lives in.
+                if (isInlineContainer(element)) {
+                    closeInline(optionid);
+                } else {
+                    closeModal(optionid);
+                }
                 break;
             default:
                 break;
